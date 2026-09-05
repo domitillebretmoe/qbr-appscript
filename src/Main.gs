@@ -128,10 +128,12 @@ function addTeamTab() {
 
 function teamSheet(team) {
   const ss = SpreadsheetApp.getActive();
-  const existing = ss.getSheetByName(team);
-  if (existing) return existing;
-  const sheet = ss.insertSheet(team);
-  sheet.getRange('A1:B2').setValues([['Team', team], ['Quarter', defaultQuarter()]]);
+  const sheet = ss.getSheetByName(team) || ss.insertSheet(team);
+  // Existing tabs (e.g. copied from last quarter's workbook) get the A1:A2 markers so they count as team tabs.
+  const [[, b1], [, b2]] = sheet.getRange('A1:B2').getValues();
+  let quarter = String(b2).trim();
+  try { parseQuarter(quarter); } catch (e) { quarter = defaultQuarter(); }
+  sheet.getRange('A1:B2').setValues([['Team', String(b1).trim() || team], ['Quarter', quarter]]);
   return sheet;
 }
 
