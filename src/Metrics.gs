@@ -9,7 +9,7 @@ const isWon = opp => opp.stage === 'Closed Won';
 const isLost = opp => opp.stage === 'Closed Lost';
 const inQuarter = (opps, quarter) => opps.filter(o => o.quarter === quarter);
 
-// Closed-quarter actuals. Net Added = Σ Closed Won Delta ARR + Σ Closed Lost renewal Delta ARR.
+// Closed-quarter actuals. Net Added = Sum of Closed Won Delta ARR + Sum of Closed Lost renewal Delta ARR.
 function quarterMetrics(opps, quarter, goal) {
   const rows = inQuarter(opps, quarter);
   const won = rows.filter(isWon);

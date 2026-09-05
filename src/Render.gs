@@ -137,13 +137,13 @@ function writeBlock(sheet, row, col, header, spec, values, previous, trend) {
 }
 
 function cellValue(kind, value) {
-  if (kind === 'text') return value.length ? value.join('\n') : '–';
+  if (kind === 'text') return value.length ? value.join('\n') : '-';
   return value == null ? '' : value;
 }
 
 function qoqText(kind, now, prev) {
-  if (kind === 'text' || now == null || prev == null || now === prev) return '–';
-  const arrow = now > prev ? '↑ ' : '↓ ';
+  if (kind === 'text' || now == null || prev == null || now === prev) return '-';
+  const arrow = now > prev ? '\u2191 ' : '\u2193 ';
   const diff = Math.abs(now - prev);
   if (kind === 'pct') return `${arrow}${(diff * 100).toFixed(1)}pp`;
   if (kind === 'money') return arrow + formatMoney(diff);
@@ -171,7 +171,7 @@ function writeLists(sheet, row, lists) {
   return row + 1 + Math.max(1, ...lists.map(([, items]) => items.length));
 }
 
-// Trend table at column T (header row 6, one row per quarter Q1-2026 → selected).
+// Trend table at column T (header row 6, one row per quarter Q1-2026 -> selected).
 // Returns { key: A1 range of that column's values } plus quarterCount and column(key, withHeader).
 function writeTrendData(sheet, trendRows) {
   const body = trendRows.map(m => TREND_KEYS.map(key => (m[key] == null ? '' : m[key])));
