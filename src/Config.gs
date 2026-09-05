@@ -1,6 +1,9 @@
 // Fiscal quarters are labelled "Q3-2026". FY2026 Q1 starts 1 Feb 2026 (Salesforce fiscal calendar).
 const FIRST_QUARTER = 'Q1-2026';
-const QUARTER_OPTIONS = ['Q1-2026', 'Q2-2026', 'Q3-2026', 'Q4-2026', 'Q1-2027', 'Q2-2027', 'Q3-2027', 'Q4-2027'];
+// B2 dropdown: FIRST_QUARTER through the quarter after the current one (the latest quarter a tab can be pointed at).
+function quarterOptions(today) {
+  return quartersBetween(FIRST_QUARTER, shiftQuarter(quarterOfDate(today), 1));
+}
 
 const LEDGER_SHEET = 'ARR Ledger';
 const SEED_SOURCE = 'Seeded from FY27 QBR Cockpit';

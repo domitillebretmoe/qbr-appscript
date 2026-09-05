@@ -24,18 +24,34 @@ function teamTabs() {
 function refreshActiveTab() {
   const sheet = SpreadsheetApp.getActiveSheet();
   if (!isTeamTab(sheet)) throw new Error('Select a team tab first (A1 = Team, A2 = Quarter).');
-  refreshTab(sheet);
+  withRefreshLock(() => refreshTab(sheet));
 }
 
-// Apps Script stops a run after 6 minutes, so a long refresh hands the remaining tabs to a one-off trigger.
+// One refresh at a time per workbook, so ARR Ledger rows and the pending-tabs queue are never written concurrently.
+function withRefreshLock(fn) {
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(30 * 1000)) throw new Error('Another QBR refresh is running on this workbook. Try again in a few minutes.');
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Apps Script stops a run after 6 minutes, so a long refresh queues the remaining tabs for a one-off trigger.
 const REFRESH_BUDGET_MS = 4.5 * 60 * 1000;
 const PENDING_TABS_KEY = 'QBR_PENDING_TABS';
+const CONTINUE_HANDLER = 'continueRefresh';
 
 function refreshAllTabs() {
   refreshTabsNamed(teamTabs().map(sheet => sheet.getName()));
 }
 
 function refreshTabsNamed(names) {
+  withRefreshLock(() => runRefreshQueue(names));
+}
+
+function runRefreshQueue(names) {
   const ss = SpreadsheetApp.getActive();
   const started = Date.now();
   const pending = names.slice();
@@ -44,20 +60,32 @@ function refreshTabsNamed(names) {
     if (sheet && isTeamTab(sheet)) refreshTab(sheet);
   }
   if (pending.length) {
-    PropertiesService.getDocumentProperties().setProperty(PENDING_TABS_KEY, JSON.stringify(pending));
-    ScriptApp.newTrigger('continueRefresh').timeBased().after(1000).create();
-    ss.toast(`Refreshed ${names.length - pending.length} tabs, ${pending.length} more continue in the background`, 'QBR');
+    const queued = takePendingTabs().filter(name => pending.indexOf(name) < 0);
+    PropertiesService.getDocumentProperties().setProperty(PENDING_TABS_KEY, JSON.stringify(pending.concat(queued)));
+    if (!continueTriggers().length) ScriptApp.newTrigger(CONTINUE_HANDLER).timeBased().after(1000).create();
+    ss.toast(`Refreshed ${names.length - pending.length} tabs, ${pending.length + queued.length} more continue in the background`, 'QBR');
   } else {
     ss.toast(`Refreshed ${names.length} team tabs`, 'QBR');
   }
 }
 
-function continueRefresh() {
-  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'continueRefresh').forEach(t => ScriptApp.deleteTrigger(t));
+function continueTriggers() {
+  return ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === CONTINUE_HANDLER);
+}
+
+function takePendingTabs() {
   const props = PropertiesService.getDocumentProperties();
   const pending = JSON.parse(props.getProperty(PENDING_TABS_KEY) || '[]');
   props.deleteProperty(PENDING_TABS_KEY);
-  if (pending.length) refreshTabsNamed(pending);
+  return pending;
+}
+
+function continueRefresh(e) {
+  withRefreshLock(() => {
+    continueTriggers().filter(t => !e || !e.triggerUid || t.getUniqueId() === e.triggerUid).forEach(t => ScriptApp.deleteTrigger(t));
+    const pending = takePendingTabs();
+    if (pending.length) runRefreshQueue(pending);
+  });
 }
 
 function refreshTab(sheet) {
@@ -69,12 +97,12 @@ function refreshTab(sheet) {
   renderTeamTab(sheet, buildView(team, quarter));
 }
 
-// Installable trigger target: re-renders a team tab when B1 or B2 changes.
+// Installable trigger target: re-renders a team tab when B1 or B2 changes (including a paste over B1:B2).
 function onTabEdit(e) {
   const sheet = e.range.getSheet();
-  const cell = e.range.getA1Notation();
-  if (!isTeamTab(sheet) || (cell !== 'B1' && cell !== 'B2')) return;
-  refreshTab(sheet);
+  const touchesSelector = e.range.getColumn() <= 2 && e.range.getLastColumn() >= 2 && e.range.getRow() <= 2;
+  if (!isTeamTab(sheet) || !touchesSelector) return;
+  withRefreshLock(() => refreshTab(sheet));
 }
 
 function installEditTrigger() {
@@ -94,7 +122,8 @@ function setupWorkbook() {
 function addTeamTab() {
   const response = SpreadsheetApp.getUi().prompt('Team name as in Salesforce (e.g. Europe - DACH)');
   if (response.getSelectedButton() !== SpreadsheetApp.getUi().Button.OK) return;
-  refreshTab(teamSheet(response.getResponseText().trim()));
+  const sheet = teamSheet(response.getResponseText().trim());
+  withRefreshLock(() => refreshTab(sheet));
 }
 
 function teamSheet(team) {
@@ -114,12 +143,13 @@ function defaultQuarter() {
 
 function setSalesforceCredentials() {
   const ui = SpreadsheetApp.getUi();
-  const ask = (name, hint) => {
+  const ask = (name, hint, normalize) => {
     const response = ui.prompt(`${name}`, hint, ui.ButtonSet.OK_CANCEL);
     if (response.getSelectedButton() !== ui.Button.OK) throw new Error('Cancelled');
-    PropertiesService.getScriptProperties().setProperty(name, response.getResponseText().trim());
+    const value = response.getResponseText().trim();
+    PropertiesService.getScriptProperties().setProperty(name, normalize ? normalize(value) : value);
   };
-  ask('SF_LOGIN_URL', 'My Domain URL, e.g. https://codeium.my.salesforce.com');
+  ask('SF_LOGIN_URL', 'My Domain URL, e.g. https://codeium.my.salesforce.com', expectSalesforceUrl);
   ask('SF_CLIENT_ID', 'Connected App consumer key');
   ask('SF_CLIENT_SECRET', 'Connected App consumer secret');
   sfSession = null;

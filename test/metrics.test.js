@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const ctx = vm.createContext({});
 ['Config.gs', 'Metrics.gs', 'Definitions.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 const { quarterMetrics, forecastMetrics, accountMetrics, partnerMetrics, shiftQuarter, quarterOfDate, teamToken, quartersBetween,
-  teamMatches, resolveTeam, assertSpecificTeam, definitionRows } = ctx;
+  teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions } = ctx;
 
 // Europe - DACH closed opportunities, FY2026 Q1-Q2, as returned by Salesforce (account "Test" already excluded by the query).
 const opp = (quarter, stage, account, type, recordType, deltaArr, logo, extra = {}) => Object.assign({
@@ -94,10 +94,9 @@ test('forecast quarter', () => {
 test('account and partner metrics', () => {
   const accounts = [
     { id: 'Helaba', major: true, currentArr: 150000 }, { id: 'Serrala', major: false, currentArr: 120000 },
-    { id: 'BMW Group', major: true, currentArr: 0 }, { id: 'Prospect', major: false, currentArr: 0 },
+    { id: 'BMW Group', major: true, currentArr: 0 }, { id: 'Prospect', major: false, currentArr: 0, hasOpenOpp: true },
   ];
-  const openLand = opp('Q3-2026', '1- Discovery', 'Prospect', 'Land', 'Enterprise', 1, 0);
-  const a = accountMetrics(accounts, dach.concat(openLand), 'Q2-2026');
+  const a = accountMetrics(accounts, dach, 'Q2-2026');
   assert.deepEqual(a, { activeCustomers: 2, majorCustomers: 1, enterpriseCustomers: 1, activatedProspects: 1, conversionRate: 0.5 });
   const p = partnerMetrics(dach, 'Q1-2026');
   assert.deepEqual(p, { partnerNetAddedArr: 0, partnerNewLogos: 0, partnerChurnArr: 0, partnerChurnCustomers: 0 });
@@ -148,6 +147,19 @@ test('quarter helpers', () => {
   assert.equal(teamToken('Europe - DACH'), 'DACH');
   assert.equal(teamToken('US Majors - Media, Telco'), 'Media, Telco');
   assert.equal(teamToken('US Enterprise'), 'US Enterprise');
+  assert.deepEqual(quarterOptions('2026-09-05'), ['Q1-2026', 'Q2-2026', 'Q3-2026', 'Q4-2026']);
+  assert.equal(quarterOptions('2028-03-01').pop(), 'Q2-2028');
+});
+
+test('forecast churn count only counts renewals expected to shrink', () => {
+  const rows = [
+    opp('Q3-2026', 'R2- Renewal Engagement', 'Gone', 'Renewal', 'Renewal', 0, -1, { expectedDeltaArr: -50000 }),
+    opp('Q3-2026', 'R2- Renewal Engagement', 'Flat', 'Renewal', 'Renewal', 0, -1, { expectedDeltaArr: 0 }),
+    opp('Q3-2026', '1- Discovery', 'Land', 'Land', 'Enterprise', 10000, -1, { expectedDeltaArr: 5000 }),
+  ];
+  const f = forecastMetrics(rows, 'Q3-2026', 0, {});
+  assert.equal(f.forecastChurnCount, 1);
+  assert.equal(f.forecastChurnArr, -50000);
 });
 
 test('definitions tab covers every block of a team tab', () => {

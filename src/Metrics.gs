@@ -78,16 +78,15 @@ function forecastMetrics(opps, quarter, startingArr, goal) {
     startingArr,
     forecastArr,
     forecastChurnArr,
-    forecastChurnCount: rows.filter(o => o.expectedLogoImpact < 0).length,
+    forecastChurnCount: churn.filter(o => o.expectedLogoImpact < 0).length,
     forecastEndingArr: startingArr + netForecastArr,
   };
 }
 
 // Account counts are as of the refresh (Salesforce has no per-quarter account history).
 function accountMetrics(accounts, opps, quarter) {
-  const openAccountIds = opps.filter(o => !o.isClosed).map(o => o.accountId);
   const active = accounts.filter(a => a.currentArr > 0);
-  const activated = accounts.filter(a => a.currentArr <= 0 && openAccountIds.indexOf(a.id) >= 0);
+  const activated = accounts.filter(a => a.currentArr <= 0 && a.hasOpenOpp);
   const wonLands = inQuarter(opps, quarter).filter(o => isWon(o) && o.type === 'Land');
   return {
     activeCustomers: active.length,

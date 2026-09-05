@@ -38,11 +38,11 @@ function definitionRows() {
     ['Quarter actuals', 'Lost pipeline # / $', 'Closed Lost non-renewal opportunities: count and Σ Delta ARR.', 'Opportunity.NACV__c'],
 
     ['Accounts (as of refresh)', 'Active customers', 'Accounts of the team with Current ARR > 0; Major / Enterprise split by the Major tag.', 'Account.Current_ARR__c, Major_Admin_Tag__c'],
-    ['Accounts (as of refresh)', 'Activated prospects', 'Accounts of the team with Current ARR ≤ 0 and at least one open opportunity.', 'Account.Current_ARR__c, Opportunity.IsClosed'],
+    ['Accounts (as of refresh)', 'Activated prospects', 'Accounts of the team with Current ARR ≤ 0 and at least one open opportunity (any close date, excluded owners ignored).', 'Account.Current_ARR__c, Opportunity.IsClosed'],
     ['Accounts (as of refresh)', 'Conversion (%)', 'Closed Won "Land" opportunities in the quarter ÷ (those + activated prospects).', '—'],
 
     ['Future quarters (Q+1, Q+2)', 'Net Forecast', 'Σ Expected Delta ARR of Land + Expand (non-renewal) opportunities + renewals with Expected Delta ARR > 0 + Forecast churn.', 'Opportunity.Expected_NACV__c, Type, RecordType'],
-    ['Future quarters (Q+1, Q+2)', 'Forecast churn ARR / #', 'Renewals with Expected Delta ARR < 0: Σ Expected Delta ARR; count = opportunities with Expected Logo Impact < 0.', 'Opportunity.Expected_NACV__c, Expected_Logo_Impact__c'],
+    ['Future quarters (Q+1, Q+2)', 'Forecast churn ARR / #', 'Renewals with Expected Delta ARR < 0: Σ Expected Delta ARR; count = those of them with Expected Logo Impact < 0 (expected full churns).', 'Opportunity.Expected_NACV__c, Expected_Logo_Impact__c'],
     ['Future quarters (Q+1, Q+2)', 'Net Forecast (%)', 'Net Forecast ÷ Revenue Goal.', '—'],
     ['Future quarters (Q+1, Q+2)', 'Logo forecast', 'Σ Expected Logo Impact of the quarter\'s opportunities on Major accounts.', 'Opportunity.Expected_Logo_Impact__c'],
     ['Future quarters (Q+1, Q+2)', 'Pipeline', 'Σ Delta ARR of open (not closed) opportunities in the quarter.', 'Opportunity.NACV__c, IsClosed'],

@@ -12,7 +12,7 @@ function scriptProperty(name) {
 
 function sfConnect() {
   if (sfSession) return sfSession;
-  const response = UrlFetchApp.fetch(`${scriptProperty('SF_LOGIN_URL')}/services/oauth2/token`, {
+  const response = UrlFetchApp.fetch(`${expectSalesforceUrl(scriptProperty('SF_LOGIN_URL'))}/services/oauth2/token`, {
     method: 'post',
     muteHttpExceptions: true,
     payload: {
@@ -58,6 +58,14 @@ function ownerClause() {
   return EXCLUDED_OWNERS.length ? `AND Owner.Name NOT IN (${EXCLUDED_OWNERS.map(soqlLiteral).join(', ')})` : '';
 }
 
+function expectSalesforceUrl(url) {
+  const match = /^https:\/\/([a-z0-9.-]+)\/?$/i.exec(String(url).trim());
+  if (!match || !/\.(my\.salesforce\.com|salesforce\.com|force\.com)$/i.test(match[1])) {
+    throw new Error(`SF_LOGIN_URL must be an https Salesforce My Domain such as https://codeium.my.salesforce.com, got "${url}"`);
+  }
+  return `https://${match[1]}`;
+}
+
 function fetchOpportunities(team, lastFiscalYear) {
   const query = `
     SELECT Id, Name, StageName, IsClosed, IsWon, Type, RecordType.Name, CloseDate, FiscalYear, FiscalQuarter,
@@ -94,8 +102,8 @@ function fetchOpportunities(team, lastFiscalYear) {
   })).filter(o => teamMatches(o.team, team));
 }
 
-// Only accounts that can count as an active customer or an activated prospect.
-// SOQL does not allow a semi-join inside OR, so the two populations are fetched separately and merged.
+// Only accounts that can count as an active customer or an activated prospect (any open opportunity, whatever its
+// close date). SOQL does not allow a semi-join inside OR, so the two populations are fetched separately and merged.
 function fetchAccounts(team) {
   const base = `
     SELECT Id, Name, Major_Admin_Tag__c, Current_ARR__c, Team__r.Name, Subteam__r.Name
@@ -103,13 +111,16 @@ function fetchAccounts(team) {
     WHERE ${teamClause(['Team__r.Name', 'Subteam__r.Name'], team)}
       AND Name != 'Test'`;
   const customers = soql(`${base} AND Current_ARR__c > 0`);
-  const prospects = soql(`${base} AND Id IN (SELECT AccountId FROM Opportunity WHERE IsClosed = false)`);
+  const prospects = soql(`${base} AND Id IN (SELECT AccountId FROM Opportunity WHERE IsClosed = false ${ownerClause()})`);
+  const hasOpenOpp = {};
+  prospects.forEach(r => { hasOpenOpp[r.Id] = true; });
   const seen = {};
   return customers.concat(prospects).filter(r => !seen[r.Id] && (seen[r.Id] = true)).map(r => ({
     id: r.Id,
     name: r.Name,
     major: r.Major_Admin_Tag__c === true,
     currentArr: r.Current_ARR__c || 0,
+    hasOpenOpp: hasOpenOpp[r.Id] === true,
     team: resolveTeam(r.Team__r && r.Team__r.Name, r.Subteam__r && r.Subteam__r.Name, ''),
   })).filter(a => teamMatches(a.team, team));
 }

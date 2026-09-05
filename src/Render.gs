@@ -103,8 +103,11 @@ function resetSheet(sheet, team, quarter) {
   sheet.getRange('A1:B2').setValues([['Team', team], ['Quarter', quarter]]);
   sheet.getRange('A1:A2').setFontWeight('bold');
   sheet.getRange('B1:B2').setBackground('#fff2cc');
-  sheet.getRange('B2').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(QUARTER_OPTIONS, true).build());
-  sheet.getRange('D1').setValue(`Refreshed ${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')}`).setFontColor('#888888');
+  const now = new Date();
+  const options = quarterOptions(Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+  if (options.indexOf(quarter) < 0) options.push(quarter);
+  sheet.getRange('B2').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(options, true).build());
+  sheet.getRange('D1').setValue(`Refreshed ${Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')}`).setFontColor('#888888');
   sheet.setHiddenGridlines(true);
 }
 
