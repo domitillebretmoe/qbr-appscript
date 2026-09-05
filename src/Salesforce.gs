@@ -6,7 +6,7 @@ let sfSession = null;
 
 function scriptProperty(name) {
   const value = PropertiesService.getScriptProperties().getProperty(name);
-  if (!value) throw new Error(`Script property ${name} is missing. Use QBR ▸ Set Salesforce credentials.`);
+  if (!value) throw new Error(`Script property ${name} is missing. Use QBR > Set Salesforce credentials.`);
   return value;
 }
 

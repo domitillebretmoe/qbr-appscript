@@ -5,10 +5,10 @@ function onOpen() {
     .addItem('Refresh all team tabs', 'refreshAllTabs')
     .addSeparator()
     .addItem('Set up workbook (all teams + ARR Ledger + Definitions)', 'setupWorkbook')
-    .addItem('Add team tab…', 'addTeamTab')
+    .addItem('Add team tab...', 'addTeamTab')
     .addItem('Refresh on B1/B2 edit (install trigger)', 'installEditTrigger')
     .addSeparator()
-    .addItem('Set Salesforce credentials…', 'setSalesforceCredentials')
+    .addItem('Set Salesforce credentials...', 'setSalesforceCredentials')
     .addToUi();
 }
 
