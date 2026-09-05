@@ -1,0 +1,8 @@
+{
+  "name": "qbr-appscript",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "push": "clasp push"
+  }
+}
