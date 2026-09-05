@@ -4,7 +4,7 @@ function onOpen() {
     .addItem('Refresh this tab', 'refreshActiveTab')
     .addItem('Refresh all team tabs', 'refreshAllTabs')
     .addSeparator()
-    .addItem('Set up workbook (all teams + ARR Ledger + Definitions)', 'setupWorkbook')
+    .addItem('Set up workbook (all teams + ARR Ledger + Raw Data + Definitions)', 'setupWorkbook')
     .addItem('Add team tab...', 'addTeamTab')
     .addItem('Refresh on B1/B2 edit (install trigger)', 'installEditTrigger')
     .addSeparator()
@@ -94,7 +94,9 @@ function refreshTab(sheet) {
   if (!team) throw new Error(`${sheet.getName()}: B1 must hold the team name.`);
   assertSpecificTeam(team);
   parseQuarter(quarter);
-  renderTeamTab(sheet, buildView(team, quarter));
+  const view = buildView(team, quarter);
+  renderTeamTab(sheet, view);
+  writeRawData(team, view.opps);
 }
 
 // Installable trigger target: re-renders a team tab when B1 or B2 changes (including a paste over B1:B2).
@@ -159,7 +161,7 @@ function setSalesforceCredentials() {
   ui.alert('Salesforce connection OK');
 }
 
-// Everything a team tab needs, computed from Salesforce + the ARR Ledger.
+// Everything a team tab needs, computed from Salesforce + the ARR Ledger. `opps` are the fetched rows, for the Raw Data tab.
 function buildView(team, quarter) {
   const next1 = shiftQuarter(quarter, 1);
   const next2 = shiftQuarter(quarter, 2);
@@ -178,5 +180,5 @@ function buildView(team, quarter) {
 
   const future1 = forecastMetrics(opps, next1, current.endingArr, goalFor(next1));
   const future2 = forecastMetrics(opps, next2, future1.forecastEndingArr, goalFor(next2));
-  return { team, quarter, trend, current, future: [future1, future2] };
+  return { team, quarter, trend, current, future: [future1, future2], opps };
 }

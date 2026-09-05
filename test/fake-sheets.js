@@ -20,7 +20,10 @@ class FakeSheet {
     this.rowHeights = {};
     this.colWidths = {};
     this.frozenRows = 0;
+    this.frozenColumns = 0;
     this.hiddenGridlines = false;
+    this.filter = null;
+    this.tabColor = null;
   }
   cell(r, c) { return this.cells[`${r},${c}`] || (this.cells[`${r},${c}`] = { row: r, col: c }); }
   getName() { return this.name; }
@@ -49,7 +52,10 @@ class FakeSheet {
   setColumnWidth(c, w) { this.colWidths[c] = w; return this; }
   setColumnWidths(c, n, w) { for (let i = 0; i < n; i++) this.colWidths[c + i] = w; return this; }
   setFrozenRows(n) { this.frozenRows = n; }
+  setFrozenColumns(n) { this.frozenColumns = n; }
   setHiddenGridlines(v) { this.hiddenGridlines = v; }
+  setTabColor(v) { this.tabColor = v; return this; }
+  getFilter() { return this.filter; }
 }
 
 class FakeRange {
@@ -79,9 +85,10 @@ class FakeRange {
   setWrap(v) { return this.style('wrap', v); }
   setDataValidation(v) { return this.style('validation', v); }
   merge() { this.sheet.merges.push(this.getA1Notation()); return this; }
+  createFilter() { this.sheet.filter = { range: this.getA1Notation(), remove: () => { this.sheet.filter = null; } }; return this.sheet.filter; }
   breakApart() { return this; }
   setBorder(top, left, bottom, right, vertical, horizontal, color, style) {
-    this.sheet.borders.push({ range: this.getA1Notation(), top, left, bottom, right, vertical, horizontal, color });
+    this.sheet.borders.push({ range: this.getA1Notation(), top, left, bottom, right, vertical, horizontal, color, style });
     return this;
   }
 }
@@ -100,6 +107,8 @@ const builder = (state = {}) => new Proxy({}, {
   get: (t, k) => {
     if (k === 'build') return () => state;
     if (k === 'setRanges') return ranges => builder(Object.assign(state, { ranges: ranges.map(r => r.getA1Notation()) }));
+    if (k === 'setGradientMinpointWithValue') return (color, type, value) => builder(Object.assign(state, { min: { color, value } }));
+    if (k === 'setGradientMaxpointWithValue') return (color, type, value) => builder(Object.assign(state, { max: { color, value } }));
     return () => builder(state);
   },
 });
@@ -130,7 +139,7 @@ function globals() {
       newRichTextValue: richText,
       newTextStyle: textStyle,
       InterpolationType: { NUMBER: 'NUMBER' },
-      BorderStyle: { SOLID: 'SOLID' },
+      BorderStyle: { SOLID: 'SOLID', SOLID_MEDIUM: 'SOLID_MEDIUM' },
     },
     Charts: { ChartType: { COLUMN: 'COLUMN', BAR: 'BAR', PIE: 'PIE', LINE: 'LINE' } },
     Utilities: { formatDate: (d, tz, pattern) => (pattern.length > 10 ? d.toISOString().slice(0, 16).replace('T', ' ') : d.toISOString().slice(0, 10)) },

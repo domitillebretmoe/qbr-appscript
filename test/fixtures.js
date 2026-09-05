@@ -4,6 +4,7 @@
 const opp = (quarter, stage, account, type, recordType, deltaArr, logo, extra = {}) => Object.assign({
   quarter, stage, account, type, recordType, deltaArr, expectedLogoImpact: logo, isClosed: stage.startsWith('Closed'),
   expectedDeltaArr: 0, lostReason: '', accountId: account, major: false, oppTeam: 'Europe', oppGroup: 'Europe',
+  id: '', name: `${account} - ${type}`, closeDate: '', owner: '', team: 'Europe - DACH',
 }, extra);
 const dach = [
   opp('Q1-2026', 'Closed Won', 'CompuGroup', 'One Time', 'Enterprise', 0, 0),

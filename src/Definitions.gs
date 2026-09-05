@@ -53,6 +53,7 @@ function definitionRows() {
 
     ['ARR Ledger', 'Rows', 'One row per team and quarter: Starting ARR, Net Added ARR, Ending ARR, Source. Starting = previous quarter\'s Ending; Ending = Starting + Net Added.', 'ARR Ledger tab'],
     ['ARR Ledger', 'Source', `"${SEED_SOURCE}" rows (Q1-2026, Q2-2026) are fixed values from last quarter's workbook. Rows stamped "Salesforce <date>" are recomputed on every refresh. Any other text (e.g. "Locked") freezes the row as typed.`, '-'],
+    ['Raw Data', 'Rows', 'Every Salesforce opportunity fetched for a team tab (all fiscal quarters from Q1-2026 to Q+2), one row each, with the Bucket it is counted in: Closed Won - Land/Expand, Won renewal, Won renewal - downgrade, Full churn, Lost pipeline, Open pipeline. Filter on Tab + Quarter to tie a metric out. Refreshing a tab replaces that tab\'s rows.', 'Raw Data tab'],
   ];
 }
 

@@ -30,7 +30,7 @@ const previewOpps = dach.filter(o => o.quarter < 'Q3-2026').concat([
 ]);
 
 const ctx = vm.createContext(globals());
-['Config.gs', 'Metrics.gs', 'Render.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
+['Config.gs', 'Metrics.gs', 'Render.gs', 'RawData.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 
 // Same shape as buildView() in Main.gs, with the ledger replaced by the seeded DACH values.
 function sampleView(quarter = 'Q2-2026', opps = dach) {
@@ -59,7 +59,7 @@ function sampleView(quarter = 'Q2-2026', opps = dach) {
   const next2 = ctx.shiftQuarter(quarter, 2);
   const future1 = ctx.forecastMetrics(opps, next1, current.endingArr, goalFor(next1));
   const future2 = ctx.forecastMetrics(opps, next2, future1.forecastEndingArr, goalFor(next2));
-  return { team: 'Europe - DACH', quarter, trend, current, future: [future1, future2] };
+  return { team: 'Europe - DACH', quarter, trend, current, future: [future1, future2], opps };
 }
 
 function render(view) {
@@ -73,10 +73,9 @@ test('team tab renders every block, six KPI cards and six charts', () => {
   const values = Object.values(sheet.cells).map(c => c.value);
   assert.equal(sheet.cell(1, 2).value, 'Europe - DACH');
   assert.equal(sheet.cell(2, 2).value, 'Q2-2026');
-  assert.equal(sheet.cell(3, 2).value, 'EUROPE - DACH   |   Q2-2026 QBR');
+  assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q2-2026 QBR');
   ['Net Added ARR', 'Starting ARR', 'Forecast Ending ARR', '# Active Customers', 'Top 3 Churns'].forEach(label => assert.ok(values.includes(label), label));
-  assert.ok(values.some(v => /^PREVIOUS QUARTER/.test(v)));
-  assert.ok(values.some(v => /^PARTNER CONTRIBUTION/.test(v)));
+  ['PREVIOUS QUARTER', 'FUTURE QUARTER(S)', 'PARTNER CONTRIBUTION', 'CHARTS'].forEach(label => assert.ok(values.includes(label), label));
   assert.equal(sheet.charts.length, 6);
   assert.equal(sheet.frozenRows, 3);
   // KPI cards: label row 5, value row 6, QoQ row 7.
@@ -90,9 +89,38 @@ test('team tab renders every block, six KPI cards and six charts', () => {
   assert.equal(val('Starting ARR') + val('Added ARR') + val('Downgrade $') + val('Full Churn $'), val('Ending ARR'));
 });
 
+const RAW_HEADER = vm.runInContext('RAW_HEADER', ctx);
+
+test('Raw Data tab lists every opportunity of the tab with its bucket and replaces only that tab\'s rows', () => {
+  const raw = new FakeSheet('Raw Data');
+  ctx.SpreadsheetApp.getActive = () => ({ getSheetByName: () => raw, insertSheet: () => raw });
+  raw.getRange(1, 1, 2, RAW_HEADER.length).setValues([RAW_HEADER, ['Other team', 'Other team', 'Q2-2026', 'Acme'].concat(Array(RAW_HEADER.length - 4).fill(''))]);
+  ctx.writeRawData('Europe - DACH', dach);
+  const rows = raw.getRange(2, 1, raw.getLastRow() - 1, RAW_HEADER.length).getValues();
+  assert.equal(rows.length, dach.length + 1);
+  assert.equal(rows.filter(r => r[0] === 'Other team').length, 1);
+  const bucket = (quarter, account) => rows.find(r => r[2] === quarter && r[3] === account)[8];
+  assert.equal(bucket('Q2-2026', 'Deutsche Telekom'), 'Full churn');
+  assert.equal(bucket('Q1-2026', 'Deutsche Telekom'), 'Lost pipeline');
+  assert.equal(bucket('Q2-2026', 'Helaba'), 'Closed Won - Land');
+  // Net Added ARR ties to the raw rows: Closed Won Delta ARR + full-churn Delta ARR.
+  const q2 = rows.filter(r => r[0] === 'Europe - DACH' && r[2] === 'Q2-2026');
+  const netAdded = q2.filter(r => r[5] === 'Closed Won' || r[8] === 'Full churn').reduce((t, r) => t + r[10], 0);
+  assert.equal(netAdded, -66000);
+  assert.equal(raw.frozenRows, 1);
+  assert.ok(raw.filter);
+  // Re-running for the same tab does not duplicate.
+  ctx.writeRawData('Europe - DACH', dach);
+  assert.equal(raw.getLastRow() - 1, dach.length + 1);
+});
+
 if (process.argv.includes('--dump')) {
   const quarter = process.argv[process.argv.indexOf('--dump') + 2] || 'Q3-2026';
-  const sheet = render(sampleView(quarter, previewOpps));
+  const view = sampleView(quarter, previewOpps);
+  const sheet = render(view);
   sheet.getRange('D1').setValue('SAMPLE DATA - illustrative numbers showing the layout Render.gs draws; the live tab is refreshed from Salesforce');
-  fs.writeFileSync(process.argv[process.argv.indexOf('--dump') + 1], JSON.stringify(sheet, null, 1));
+  const raw = new FakeSheet('Raw Data');
+  ctx.SpreadsheetApp.getActive = () => ({ getSheetByName: () => raw, insertSheet: () => raw });
+  ctx.writeRawData(view.team, view.opps);
+  fs.writeFileSync(process.argv[process.argv.indexOf('--dump') + 1], JSON.stringify([sheet, raw], null, 1));
 }

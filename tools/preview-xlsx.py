@@ -4,16 +4,19 @@
     node test/render.test.js --dump /tmp/preview.json Q2-2026 && python3 tools/preview-xlsx.py /tmp/preview.json preview.xlsx
 
 Google-only features are approximated: SPARKLINE formulas become unicode sparklines, the percentage
-gradient becomes a static 3-colour scale, and charts are rebuilt as Excel charts from the same data.
+gradient becomes an Excel 2-colour scale, and charts are rebuilt as Excel charts from the same data.
 """
 import json
 import sys
 
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.chart import BarChart, LineChart, PieChart, Reference
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.worksheet.filters import AutoFilter
 
 SPARK = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588'
 
@@ -31,14 +34,20 @@ def spark(values):
 
 
 def main(src, dst):
-    data = json.load(open(src))
-    cells = data['cells']
+    dumps = json.load(open(src))
     wb = Workbook()
-    ws = wb.active
+    for i, data in enumerate(dumps if isinstance(dumps, list) else [dumps]):
+        ws = wb.active if i == 0 else wb.create_sheet()
+        write_sheet(ws, data)
+    wb.save(dst)
+
+
+def write_sheet(ws, data):
+    cells = data['cells']
     ws.title = data['name']
     ws.sheet_view.showGridLines = not data['hiddenGridlines']
-    if data['frozenRows']:
-        ws.freeze_panes = f'A{data["frozenRows"] + 1}'
+    if data['frozenRows'] or data.get('frozenColumns'):
+        ws.freeze_panes = f'{get_column_letter(data.get("frozenColumns", 0) + 1)}{data["frozenRows"] + 1}'
     for col, px in data['colWidths'].items():
         ws.column_dimensions[get_column_letter(int(col))].width = px / 7.2
     for row, px in data['rowHeights'].items():
@@ -59,8 +68,9 @@ def main(src, dst):
             c.value = value
         if cell.get('numberFormat') and cell.get('numberFormat') != '@':
             c.number_format = cell['numberFormat']
+        font_name = cell.get('fontFamily', 'Arial')
         c.font = Font(
-            name=cell.get('fontFamily', 'Arial'), size=cell.get('fontSize', 10), bold=cell.get('fontWeight') == 'bold',
+            name=font_name, size=cell.get('fontSize', 10), bold=cell.get('fontWeight') == 'bold',
             italic=cell.get('fontStyle') == 'italic', color=color(cell.get('fontColor')),
         )
         if cell.get('background'):
@@ -70,14 +80,18 @@ def main(src, dst):
             wrap_text=bool(cell.get('wrap')),
         )
         if cell.get('richText'):
-            first = cell['richText'][0]['style']
-            c.font = Font(name='Arial', size=first.get('fontSize', 10), bold=first.get('bold', False), color=color(first.get('color')))
+            text = str(value)
+            c.value = CellRichText(*[
+                TextBlock(InlineFont(rFont=font_name, sz=run['style'].get('fontSize', 10), b=run['style'].get('bold', False),
+                                     color=color(run['style'].get('color'))), text[run['start']:run['end']])
+                for run in cell['richText']
+            ])
 
     for a1 in data['merges']:
         ws.merge_cells(a1)
 
     for b in data['borders']:
-        side = Side(style='thin', color=color(b['color']))
+        side = Side(style='medium' if b.get('style') == 'SOLID_MEDIUM' else 'thin', color=color(b['color']))
         c1, r1, c2, r2 = range_boundaries(b['range'])
         for r in range(r1, r2 + 1):
             for cc in range(c1, c2 + 1):
@@ -93,8 +107,11 @@ def main(src, dst):
     for rule in data['rules']:
         for ref in rule.get('ranges', []):
             ws.conditional_formatting.add(ref, ColorScaleRule(
-                start_type='num', start_value=0, start_color='F8CBAD', mid_type='num', mid_value=0.5, mid_color='FCE4D6',
-                end_type='num', end_value=1, end_color='A9D08E'))
+                start_type='num', start_value=float(rule['min']['value']), start_color=color(rule['min']['color']),
+                end_type='num', end_value=float(rule['max']['value']), end_color=color(rule['max']['color'])))
+
+    if data.get('filter'):
+        ws.auto_filter = AutoFilter(ref=data['filter']['range'])
 
     # Sheets grows wrapped rows automatically; Excel needs an explicit height.
     for key, cell in cells.items():
@@ -106,7 +123,7 @@ def main(src, dst):
             ws.row_dimensions[cell['row']].height = max(ws.row_dimensions[cell['row']].height or 0, 13.5 * lines)
 
     last_row = max(c['row'] for c in cells.values() if c.get('value') not in (None, ''))
-    last_row = max(last_row, *(ch['position']['row'] + 16 for ch in data['charts']))
+    last_row = max([last_row] + [ch['position']['row'] + 16 for ch in data['charts']])
     last_col = max(int(c) for c in data['colWidths'])
     ws.print_area = f'A1:{get_column_letter(last_col)}{last_row}'
     ws.page_setup.orientation = 'landscape'
@@ -117,8 +134,8 @@ def main(src, dst):
     for chart in data['charts']:
         add_chart(ws, chart)
 
-    ws.sheet_properties.tabColor = '1F3864'
-    wb.save(dst)
+    if data.get('tabColor'):
+        ws.sheet_properties.tabColor = color(data['tabColor'])
 
 
 def add_chart(ws, spec):
