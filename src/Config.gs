@@ -6,6 +6,7 @@ function quarterOptions(today) {
 }
 
 const LEDGER_SHEET = 'ARR Ledger';
+const RAW_SHEET = 'Raw Data';
 const SEED_SOURCE = 'Seeded from FY27 QBR Cockpit';
 
 // Team names as they appear in Salesforce (Account > Team). The text after " - " is the contains-token

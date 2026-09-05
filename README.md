@@ -73,7 +73,19 @@ To add a team later, use **QBR → Add team tab…** and add its `Q1-2026` Start
 npm test
 ```
 
-Runs the pure calculation files (`Config.gs`, `Metrics.gs`, `Definitions.gs`) against last quarter's Europe - DACH opportunities.
+Runs the pure calculation files (`Config.gs`, `Metrics.gs`, `Definitions.gs`) against last quarter's Europe - DACH opportunities,
+and renders a team tab through `Render.gs` against an in-memory Sheets stand-in (`test/fake-sheets.js`).
+
+### Layout preview (.xlsx)
+
+To see the tab layout without a Salesforce connection, render it with illustrative sample data and convert to Excel:
+
+```sh
+node test/render.test.js --dump /tmp/preview.json Q3-2026
+python3 tools/preview-xlsx.py /tmp/preview.json preview.xlsx   # needs openpyxl
+```
+
+Sparklines, the percentage gradient and charts are approximated in Excel; everything else is what `Render.gs` draws.
 
 ## Reconciliation against the FY27 QBR Cockpit workbook
 

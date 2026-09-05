@@ -1,18 +1,34 @@
-// Draws one team tab. Layout mirrors the Q3-26 QBR Workbook: B1 team, B2 quarter, then
-// PREVIOUS QUARTER / FUTURE QUARTER(S) / PARTNER CONTRIBUTION blocks, charts, and a data area from column T.
+// Draws one team tab as a dashboard: inputs (B1/B2), title banner, KPI cards, then the PREVIOUS QUARTER /
+// FUTURE QUARTER(S) / PARTNER CONTRIBUTION tables, charts, and the trend data area from column T.
 const DATA_COL = 20;
-const FORMATS = { money: '$#,##0', pct: '0.0%', int: '0', text: '@' };
-const COLORS = { title: '#1f3864', header: '#d9e1f2', section: '#f2f2f2', up: '#2e7d32', down: '#c62828' };
+const LAST_COL = 14; // N
+const FORMATS = { money: '$#,##0;-$#,##0', pct: '0.0%', int: '0', text: '@' };
+// Cognition palette: warm off-white page, near-black ink, electric-blue accent, flat white cards.
+const FONT = 'Inter';
+const COLORS = {
+  ink: '#191919', accent: '#2200ff', accentSoft: '#8f9bff', page: '#f7f6f5', card: '#ffffff', band: '#eeedeb', header: '#f7f6f5',
+  border: '#e5e5e5', line: '#efeeec', label: '#191919', muted: '#737373', onDark: '#a3a3a3',
+  up: '#15803d', down: '#fa5050', upOnDark: '#4ade80', barLow: '#ffffff', barHigh: '#c5ccff',
+};
+// Metrics where an increase is bad news (colours the QoQ arrow).
+const BAD_UP = ['churnCustomers', 'lostPipelineCount', 'downgradeCount', 'fullChurnCount', 'partnerChurnCustomers', 'forecastChurnCount'];
 
 // [label, kind, key]. Keys index the metrics objects built in buildView.
+const KPI_CARDS = [
+  ['Net Added ARR', 'money', 'netAddedArr'],
+  ['Attainment', 'pct', 'attainment'],
+  ['Ending ARR', 'money', 'endingArr'],
+  ['Renewal rate', 'pct', 'renewalRate'],
+  ['Churn ARR', 'money', 'churnArr'],
+  ['Active customers', 'int', 'activeCustomers'],
+];
 const PREVIOUS_ROWS = [
   ['Revenue Goal', 'money', 'revenueGoal'],
   ['Net Added ARR', 'money', 'netAddedArr'],
   ['Attainment (%)', 'pct', 'attainment'],
   ['Logo Goal', 'int', 'logoGoal'],
-  ['Attainment', 'int', 'logoAttainment'],
-  ['Attainment (%)', 'pct', 'logoAttainmentPct'],
-  ['Ending ARR', 'money', 'endingArr'],
+  ['Logo Attainment', 'int', 'logoAttainment'],
+  ['Logo Attainment (%)', 'pct', 'logoAttainmentPct'],
   ['# Renewals', 'int', 'renewals'],
   ['# Won Renewals', 'int', 'wonRenewals'],
   ['Renewal Rate', 'pct', 'renewalRate'],
@@ -36,7 +52,7 @@ const ACCOUNT_ROWS = [
   ['# Major Customers', 'int', 'majorCustomers'],
   ['# Enterprise Customers', 'int', 'enterpriseCustomers'],
   ['# Activated Prospects', 'int', 'activatedProspects'],
-  ['Conversion Rate Activation:Conversion', 'pct', 'conversionRate'],
+  ['Conversion Rate (Activation : Conversion)', 'pct', 'conversionRate'],
   ['# Lost Pipeline', 'int', 'lostPipelineCount'],
   ['$ Lost Pipeline', 'money', 'lostPipelineArr'],
 ];
@@ -64,75 +80,147 @@ const PARTNER_ROWS = [
 ];
 // Metrics kept per quarter in the data area (drives sparklines and the trend chart).
 const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logoAttainmentPct', 'endingArr',
-  'renewals', 'wonRenewals', 'renewalRate', 'churnArr', 'churnCustomers', 'conversionRate', 'lostPipelineCount', 'lostPipelineArr',
-  'partnerNetAddedArr', 'partnerNewLogos', 'partnerChurnArr', 'partnerChurnCustomers'];
+  'renewals', 'wonRenewals', 'renewalRate', 'churnArr', 'churnCustomers', 'activeCustomers', 'conversionRate', 'lostPipelineCount',
+  'lostPipelineArr', 'partnerNetAddedArr', 'partnerNewLogos', 'partnerChurnArr', 'partnerChurnCustomers'];
 
 function renderTeamTab(sheet, view) {
   resetSheet(sheet, view.team, view.quarter);
   const trend = writeTrendData(sheet, view.trend);
   const previous = view.trend.length > 1 ? view.trend[view.trend.length - 2] : null;
 
-  let row = writeTitle(sheet, 4, 'PREVIOUS QUARTER');
-  const blocks = [
-    writeBlock(sheet, row, 2, ['Metric(s)', view.quarter, 'QoQ', 'Trend'], PREVIOUS_ROWS, [view.current], previous, trend),
-    writeBlock(sheet, row, 7, ['Metric', view.quarter], ARR_ROWS, [view.current], null, null),
-    writeBlock(sheet, row, 10, ['Metric', view.quarter, 'QoQ', 'Trend'], ACCOUNT_ROWS, [view.current], previous, trend),
-  ];
-  row = Math.max(...blocks) + 1;
-  row = writeLists(sheet, row, [['Logos Won', view.current.logosWon], ['Logos Lost', view.current.logosLost]]) + 1;
+  writeBanner(sheet, 3, view.team, `${view.quarter} QBR`);
+  let row = writeKpiCards(sheet, 5, view.current, previous) + 1;
 
-  row = writeTitle(sheet, row, 'FUTURE QUARTER(S)');
-  const [q1, q2] = view.future;
+  row = writeSection(sheet, row, 'PREVIOUS QUARTER', `${view.quarter} actuals vs goal, QoQ vs ${previous ? previous.quarter : 'n/a'}, trend from ${FIRST_QUARTER}`);
   row = Math.max(
-    writeBlock(sheet, row, 2, ['Metric(s)', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ROWS, [q1, q2], null, null),
-    writeBlock(sheet, row, 7, ['Metric', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ARR_ROWS, [q1, q2], null, null),
+    writeBlock(sheet, row, 2, ['Metric', view.quarter, 'QoQ', 'Trend'], PREVIOUS_ROWS, [view.current], previous, trend),
+    writeBlock(sheet, row, 7, ['ARR bridge', view.quarter, '% of Starting'], ARR_ROWS, [view.current], null, null, view.current.startingArr),
+    writeBlock(sheet, row, 11, ['Accounts', view.quarter, 'QoQ', 'Trend'], ACCOUNT_ROWS, [view.current], previous, trend),
+  ) + 1;
+  row = writeLists(sheet, row, [['Logos Won', view.current.logosWon, 2], ['Logos Lost', view.current.logosLost, 7]]) + 1;
+
+  const [q1, q2] = view.future;
+  row = writeSection(sheet, row, 'FUTURE QUARTER(S)', `Forecast for ${q1.quarter} and ${q2.quarter}, pipeline = open opportunities only`);
+  row = Math.max(
+    writeBlock(sheet, row, 2, ['Metric', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ROWS, [q1, q2], null, null),
+    writeBlock(sheet, row, 7, ['ARR forecast', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ARR_ROWS, [q1, q2], null, null),
   ) + 1;
 
-  row = writeTitle(sheet, row, 'PARTNER CONTRIBUTION');
-  row = writeBlock(sheet, row, 2, ['Metric(s)', view.quarter, 'QoQ', 'Trend'], PARTNER_ROWS, [view.current], previous, trend) + 1;
+  row = writeSection(sheet, row, 'PARTNER CONTRIBUTION', `Opportunities in the ${PARTNER_GROUP} group for this team`);
+  row = writeBlock(sheet, row, 2, ['Metric', view.quarter, 'QoQ', 'Trend'], PARTNER_ROWS, [view.current], previous, trend) + 1;
 
+  row = writeSection(sheet, row, 'CHARTS', `${view.quarter} bridge, attainment, renewals, forecast and trend since ${FIRST_QUARTER}`);
   writeCharts(sheet, row, view, trend);
-  sheet.setColumnWidths(2, 12, 120);
-  [2, 7, 10].forEach(col => sheet.setColumnWidth(col, 230));
 }
 
 function resetSheet(sheet, team, quarter) {
   sheet.getCharts().forEach(chart => sheet.removeChart(chart));
   sheet.clear();
   sheet.clearConditionalFormatRules();
-  sheet.getRange('A1:B2').setValues([['Team', team], ['Quarter', quarter]]);
-  sheet.getRange('A1:A2').setFontWeight('bold');
-  sheet.getRange('B1:B2').setBackground('#fff2cc');
+  sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart();
+  sheet.setHiddenGridlines(true);
+  sheet.setTabColor(COLORS.accent);
+  sheet.setColumnWidth(1, 24);
+  sheet.setColumnWidths(2, LAST_COL - 1, 105);
+  [2, 7, 11].forEach(c => sheet.setColumnWidth(c, 170)); // metric label columns
+  sheet.setColumnWidth(LAST_COL + 1, 40);
+  sheet.getRange(1, 1, 400, LAST_COL + 1).setBackground(COLORS.page).setFontFamily(FONT).setFontSize(10).setFontColor(COLORS.label);
+
+  sheet.getRange('A1:A2').setValues([['Team'], ['Quarter']]).setFontSize(8).setFontColor(COLORS.muted);
+  sheet.getRange('B1:B2').setValues([[team], [quarter]]).setBackground(COLORS.card).setFontWeight('bold').setFontColor(COLORS.ink)
+    .setBorder(true, true, true, true, false, false, COLORS.accent, SpreadsheetApp.BorderStyle.SOLID);
   const now = new Date();
   const options = quarterOptions(Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
   if (options.indexOf(quarter) < 0) options.push(quarter);
   sheet.getRange('B2').setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(options, true).build());
-  sheet.getRange('D1').setValue(`Refreshed ${Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')}`).setFontColor('#888888');
-  sheet.setHiddenGridlines(true);
+  sheet.getRange('D1').setValue(`Refreshed ${Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')} from Salesforce`)
+    .setFontSize(8).setFontColor(COLORS.muted).setFontStyle('italic');
+  sheet.getRange('D2').setValue('Change B1 (team) or B2 (quarter) and use QBR > Refresh this tab').setFontSize(8).setFontColor(COLORS.muted);
+  sheet.setFrozenRows(3);
 }
 
-function writeTitle(sheet, row, text) {
-  sheet.getRange(row, 2).setValue(text).setFontWeight('bold').setFontSize(13).setFontColor(COLORS.title);
-  return row + 2;
+// Title row: team name in ink, quarter in the accent colour, ruled off by a thin ink line.
+function writeBanner(sheet, row, title, subtitle) {
+  sheet.setRowHeight(row, 56);
+  const text = `${title}   ${subtitle}`;
+  sheet.getRange(row, 2, 1, LAST_COL - 1).merge().setBackground(COLORS.page).setVerticalAlignment('middle').setHorizontalAlignment('left')
+    .setRichTextValue(SpreadsheetApp.newRichTextValue().setText(text)
+      .setTextStyle(0, title.length, SpreadsheetApp.newTextStyle().setBold(true).setFontSize(22).setForegroundColor(COLORS.ink).build())
+      .setTextStyle(title.length, text.length, SpreadsheetApp.newTextStyle().setBold(false).setFontSize(14).setForegroundColor(COLORS.accent).build())
+      .build())
+    .setBorder(null, null, true, null, false, false, COLORS.ink, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 }
 
-// Writes header + one line per spec row. `values` holds one metrics object per value column.
-// Returns the row after the block.
-function writeBlock(sheet, row, col, header, spec, values, previous, trend) {
+// Six cards, two columns each: label / big value / QoQ delta. Returns the row after the cards.
+function writeKpiCards(sheet, row, current, previous) {
+  sheet.setRowHeight(row, 20);
+  sheet.setRowHeight(row + 1, 36);
+  sheet.setRowHeight(row + 2, 20);
+  // First card is the hero (3 columns, dark), the rest 2 columns each (white), filling B:N.
+  KPI_CARDS.forEach(([label, kind, key], i) => {
+    const hero = i === 0;
+    const col = hero ? 2 : 3 + i * 2;
+    const span = hero ? 3 : 2;
+    sheet.getRange(row, col, 3, span).setBackground(hero ? COLORS.ink : COLORS.card)
+      .setBorder(true, true, true, true, false, false, hero ? COLORS.ink : COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
+    sheet.getRange(row, col, 1, span).merge().setValue(label.toUpperCase()).setFontSize(8).setFontColor(hero ? COLORS.onDark : COLORS.muted)
+      .setHorizontalAlignment('left').setVerticalAlignment('bottom');
+    sheet.getRange(row + 1, col, 1, span).merge().setValue(cellValue(kind, current[key])).setNumberFormat(FORMATS[kind])
+      .setFontSize(hero ? 24 : 18).setFontWeight('bold').setFontColor(hero ? COLORS.card : COLORS.ink).setHorizontalAlignment('left').setVerticalAlignment('middle');
+    const delta = previous ? qoqText(kind, current[key], previous[key]) : '';
+    let deltaColor = qoqColor(key, current[key], previous ? previous[key] : null);
+    if (hero) deltaColor = deltaColor === COLORS.up ? COLORS.upOnDark : deltaColor === COLORS.muted ? COLORS.onDark : deltaColor;
+    sheet.getRange(row + 2, col, 1, span).merge().setValue(delta ? `${delta} QoQ` : '').setFontSize(8)
+      .setFontColor(deltaColor).setHorizontalAlignment('left').setVerticalAlignment('top');
+  });
+  return row + 3;
+}
+
+// Section header: accent tag with the title in column B, muted subtitle on a light band across the rest.
+function writeSection(sheet, row, title, subtitle) {
+  sheet.setRowHeight(row, 26);
+  sheet.getRange(row, 2).setValue(title).setBackground(COLORS.accent).setFontColor(COLORS.card).setFontWeight('bold').setFontSize(9)
+    .setHorizontalAlignment('left').setVerticalAlignment('middle');
+  sheet.getRange(row, 3, 1, LAST_COL - 2).merge().setValue(subtitle).setBackground(COLORS.band).setFontColor(COLORS.muted).setFontSize(9)
+    .setHorizontalAlignment('left').setVerticalAlignment('middle');
+  return row + 1;
+}
+
+// Header + one line per spec row. `values` holds one metrics object per value column. `shareOf` adds a
+// "% of <shareOf>" column for money rows. Returns the row after the block.
+function writeBlock(sheet, row, col, header, spec, values, previous, trend, shareOf) {
+  const width = header.length;
   const body = spec.map(([label, kind, key]) => {
     const line = [label].concat(values.map(m => cellValue(kind, m[key])));
     if (previous) line.push(qoqText(kind, values[0][key], previous[key]));
-    if (trend) line.push(trend[key] ? `=SPARKLINE(${trend[key]},{"charttype","line";"linewidth",2;"color","${COLORS.title}"})` : '');
+    if (trend) line.push(trend[key] ? `=SPARKLINE(${trend[key]},{"charttype","line";"linewidth",2;"color","${COLORS.accent}"})` : '');
+    if (shareOf != null) line.push(kind === 'money' && shareOf ? values[0][key] / shareOf : '');
+    return line.concat(Array(width - line.length).fill(''));
+  });
+  const colors = spec.map(([, , key]) => {
+    const line = Array(width).fill(COLORS.label);
+    if (previous) line[1 + values.length] = qoqColor(key, values[0][key], previous[key]);
     return line;
   });
-  const width = header.length;
-  sheet.getRange(row, col, 1, width).setValues([header]).setFontWeight('bold').setBackground(COLORS.header);
+
+  sheet.getRange(row, col, 1, width).setValues([header]).setFontWeight('bold').setFontColor(COLORS.ink).setBackground(COLORS.card).setFontSize(9)
+    .setHorizontalAlignment('right').setVerticalAlignment('middle')
+    .setBorder(null, null, true, null, false, false, COLORS.ink, SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange(row, col).setHorizontalAlignment('left');
+  sheet.setRowHeight(row, 24);
+
   const range = sheet.getRange(row + 1, col, body.length, width);
-  range.setValues(body.map(line => line.concat(Array(width - line.length).fill(''))));
-  spec.forEach(([, kind], i) => sheet.getRange(row + 1 + i, col + 1, 1, values.length).setNumberFormat(FORMATS[kind]));
-  spec.forEach(([, kind], i) => { if (kind === 'pct') addPercentBar(sheet, row + 1 + i, col + 1, values.length); });
-  range.setBorder(true, true, true, true, true, true, '#cccccc', SpreadsheetApp.BorderStyle.SOLID);
-  sheet.getRange(row + 1, col, body.length, 1).setBackground(COLORS.section).setWrap(true);
+  range.setValues(body).setBackground(COLORS.card).setFontColors(colors).setVerticalAlignment('middle');
+  range.setBorder(null, null, null, null, false, true, COLORS.line, SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange(row, col, body.length + 1, width).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange(row + 1, col, body.length, 1).setFontWeight('bold').setWrap(true);
+  sheet.getRange(row + 1, col + 1, body.length, width - 1).setHorizontalAlignment('right').setWrap(true);
+  spec.forEach(([, kind], i) => {
+    sheet.getRange(row + 1 + i, col + 1, 1, values.length).setNumberFormat(FORMATS[kind]);
+    if (kind === 'text') sheet.getRange(row + 1 + i, col + 1, 1, width - 1).merge().setHorizontalAlignment('left').setVerticalAlignment('top');
+    if (kind === 'pct') addPercentBar(sheet, row + 1 + i, col + 1, values.length);
+  });
+  if (shareOf != null) sheet.getRange(row + 1, col + width - 1, body.length, 1).setNumberFormat(FORMATS.pct).setFontColor(COLORS.muted);
   return row + 1 + body.length;
 }
 
@@ -143,11 +231,17 @@ function cellValue(kind, value) {
 
 function qoqText(kind, now, prev) {
   if (kind === 'text' || now == null || prev == null || now === prev) return '-';
-  const arrow = now > prev ? '\u2191 ' : '\u2193 ';
+  const arrow = now > prev ? '\u25B2 ' : '\u25BC ';
   const diff = Math.abs(now - prev);
   if (kind === 'pct') return `${arrow}${(diff * 100).toFixed(1)}pp`;
   if (kind === 'money') return arrow + formatMoney(diff);
   return `${arrow}${diff}`;
+}
+
+function qoqColor(key, now, prev) {
+  if (now == null || prev == null || now === prev || typeof now !== 'number') return COLORS.muted;
+  const improved = BAD_UP.indexOf(key) >= 0 ? now < prev : now > prev;
+  return improved ? COLORS.up : COLORS.down;
 }
 
 // Data bars on percentage cells, capped at 100%.
@@ -155,28 +249,36 @@ function addPercentBar(sheet, row, col, width) {
   const range = sheet.getRange(row, col, 1, width);
   const rules = sheet.getConditionalFormatRules();
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .setGradientMinpointWithValue('#f8cbad', SpreadsheetApp.InterpolationType.NUMBER, '0')
-    .setGradientMaxpointWithValue('#a9d08e', SpreadsheetApp.InterpolationType.NUMBER, '1')
+    .setGradientMinpointWithValue(COLORS.barLow, SpreadsheetApp.InterpolationType.NUMBER, '0')
+    .setGradientMaxpointWithValue(COLORS.barHigh, SpreadsheetApp.InterpolationType.NUMBER, '1')
     .setRanges([range]).build());
   sheet.setConditionalFormatRules(rules);
 }
 
-// Side-by-side lists (Logos Won at column B, Logos Lost at column G). Returns the row after the longest list.
+// Side-by-side lists ([title, items, column]), four columns wide. Returns the row after the longest list.
 function writeLists(sheet, row, lists) {
-  const cols = [2, 7];
-  lists.forEach(([title, items], i) => {
-    sheet.getRange(row, cols[i]).setValue(title).setFontWeight('bold').setBackground(COLORS.header);
-    if (items.length) sheet.getRange(row + 1, cols[i], items.length, 1).setValues(items.map(item => [item]));
+  const height = Math.max(1, ...lists.map(([, items]) => items.length));
+  lists.forEach(([title, items, col]) => {
+    sheet.getRange(row, col, 1, 4).merge().setValue(`${title} (${items.length})`).setFontWeight('bold').setFontColor(COLORS.ink).setFontSize(9)
+      .setBackground(COLORS.card).setVerticalAlignment('middle')
+      .setBorder(null, null, true, null, false, false, COLORS.ink, SpreadsheetApp.BorderStyle.SOLID);
+    sheet.setRowHeight(row, 24);
+    const body = sheet.getRange(row + 1, col, height, 4);
+    body.setBackground(COLORS.card);
+    if (items.length) sheet.getRange(row + 1, col, items.length, 1).setValues(items.map(item => [item]));
+    else sheet.getRange(row + 1, col).setValue('-').setFontColor(COLORS.muted);
+    sheet.getRange(row, col, height + 1, 4).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
   });
-  return row + 1 + Math.max(1, ...lists.map(([, items]) => items.length));
+  return row + 1 + height;
 }
 
 // Trend table at column T (header row 6, one row per quarter Q1-2026 -> selected).
 // Returns { key: A1 range of that column's values } plus quarterCount and column(key, withHeader).
 function writeTrendData(sheet, trendRows) {
   const body = trendRows.map(m => TREND_KEYS.map(key => (m[key] == null ? '' : m[key])));
-  sheet.getRange(6, DATA_COL, 1, TREND_KEYS.length).setValues([TREND_KEYS]).setFontWeight('bold').setFontColor('#888888');
-  sheet.getRange(7, DATA_COL, body.length, TREND_KEYS.length).setValues(body).setFontColor('#888888');
+  sheet.getRange(5, DATA_COL).setValue('Data behind the sparklines and charts (do not edit)').setFontColor(COLORS.muted).setFontSize(8);
+  sheet.getRange(6, DATA_COL, 1, TREND_KEYS.length).setValues([TREND_KEYS]).setFontWeight('bold').setFontColor(COLORS.muted).setFontSize(8);
+  sheet.getRange(7, DATA_COL, body.length, TREND_KEYS.length).setValues(body).setFontColor(COLORS.muted).setFontSize(8);
   const trend = { quarterCount: body.length };
   trend.column = key => sheet.getRange(6, DATA_COL + TREND_KEYS.indexOf(key), body.length + 1, 1);
   TREND_KEYS.forEach((key, i) => { trend[key] = sheet.getRange(7, DATA_COL + i, body.length, 1).getA1Notation(); });
@@ -185,7 +287,7 @@ function writeTrendData(sheet, trendRows) {
 
 function writeDataBlock(sheet, row, rows) {
   const range = sheet.getRange(row, DATA_COL, rows.length, rows[0].length);
-  range.setValues(rows).setFontColor('#888888');
+  range.setValues(rows).setFontColor(COLORS.muted).setFontSize(8);
   return range;
 }
 
@@ -205,6 +307,8 @@ function writeCharts(sheet, row, view, trend) {
     ['Ending ARR', 0, m.endingArr, 0],
   ]);
   dataRow += 7;
+  // Cut the transparent base so the movements are visible: axis starts just below the lowest bar top.
+  const bridgeFloor = Math.max(0, Math.floor(Math.min(m.startingArr, afterAdded, afterDowngrade, m.endingArr) * 0.9 / 1e5) * 1e5);
   const attainment = writeDataBlock(sheet, dataRow, [
     ['Metric', 'Attainment'],
     ['Revenue', m.attainment || 0],
@@ -221,33 +325,48 @@ function writeCharts(sheet, row, view, trend) {
   const forecast = writeDataBlock(sheet, dataRow, [['Quarter', 'Goal', 'Net Forecast', 'Pipeline']]
     .concat(view.future.map(f => [f.quarter, f.revenueGoal, f.netForecastArr, f.pipelineArr])));
 
-  const chart = type => sheet.newChart().setChartType(type).setOption('legend', { position: 'bottom' }).setNumHeaders(1);
-  const place = (builder, r, c) => sheet.insertChart(builder.setPosition(r, c, 0, 0).setOption('width', 560).setOption('height', 320).build());
+  const chart = type => sheet.newChart().setChartType(type).setNumHeaders(1)
+    .setOption('legend', { position: 'bottom', textStyle: { color: COLORS.muted, fontSize: 10 } })
+    .setOption('titleTextStyle', { color: COLORS.ink, fontSize: 13, bold: true })
+    .setOption('backgroundColor', COLORS.card)
+    .setOption('fontName', FONT)
+    .setOption('chartArea', { left: 60, top: 40, width: '85%', height: '65%' });
+  const place = (builder, r, c) => sheet.insertChart(
+    builder.setPosition(r, c, 0, 0).setOption('width', 600).setOption('height', 300).build()
+  );
+  const rowsPerChart = 15;
 
   place(chart(Charts.ChartType.COLUMN).addRange(waterfall)
     .setOption('title', `ARR bridge ${view.quarter}`)
     .setOption('isStacked', true)
     .setOption('series', { 0: { color: 'transparent', visibleInLegend: false }, 1: { color: COLORS.up }, 2: { color: COLORS.down } })
-    .setOption('vAxis', { format: 'short' }), row, 2);
+    .setOption('vAxis', { format: 'short', gridlines: { color: COLORS.line }, viewWindow: { min: bridgeFloor } }), row, 2);
   place(chart(Charts.ChartType.BAR).addRange(attainment)
     .setOption('title', `Attainment vs goal ${view.quarter}`)
-    .setOption('hAxis', { format: 'percent', minValue: 0, maxValue: 1 })
-    .setOption('colors', [COLORS.title]), row, 7);
-  row += 17;
+    .setOption('hAxis', { format: 'percent', minValue: 0, maxValue: 1, gridlines: { color: COLORS.line } })
+    .setOption('legend', { position: 'none' })
+    .setOption('colors', [COLORS.accent]), row, 8);
+  row += rowsPerChart;
   place(chart(Charts.ChartType.PIE).addRange(renewals)
-    .setOption('title', `Renewal rate ${view.quarter}`)
-    .setOption('pieHole', 0.5)
+    .setOption('title', `Renewals ${view.quarter}: won vs lost`)
+    .setOption('pieHole', 0.55)
     .setOption('colors', [COLORS.up, COLORS.down]), row, 2);
   place(chart(Charts.ChartType.COLUMN).addRange(forecast)
     .setOption('title', 'Q+1 / Q+2 forecast vs goal')
-    .setOption('vAxis', { format: 'short' }), row, 7);
-  row += 17;
+    .setOption('colors', [COLORS.muted, COLORS.accent, COLORS.accentSoft])
+    .setOption('vAxis', { format: 'short', gridlines: { color: COLORS.line } }), row, 8);
+  row += rowsPerChart;
   place(chart(Charts.ChartType.LINE)
     .addRange(trend.column('quarter')).addRange(trend.column('revenueGoal')).addRange(trend.column('netAddedArr')).addRange(trend.column('churnArr'))
     .setOption('title', 'Net Added ARR vs goal by quarter')
-    .setOption('vAxis', { format: 'short' }), row, 2);
+    .setOption('colors', [COLORS.muted, COLORS.accent, COLORS.down])
+    .setOption('pointSize', 5)
+    .setOption('vAxis', { format: 'short', gridlines: { color: COLORS.line } }), row, 2);
   place(chart(Charts.ChartType.LINE)
     .addRange(trend.column('quarter')).addRange(trend.column('endingArr'))
     .setOption('title', 'Ending ARR by quarter')
-    .setOption('vAxis', { format: 'short' }), row, 7);
+    .setOption('colors', [COLORS.ink])
+    .setOption('pointSize', 5)
+    .setOption('legend', { position: 'none' })
+    .setOption('vAxis', { format: 'short', gridlines: { color: COLORS.line } }), row, 8);
 }
