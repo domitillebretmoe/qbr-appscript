@@ -135,13 +135,15 @@ function addTeamTab() {
   withRefreshLock(() => refreshTab(sheet));
 }
 
-// Creates (or adopts) the tab and points it at the current quarter. Existing tabs (e.g. copied from last quarter's
-// workbook) get the A1:A2 markers so they count as team tabs.
+// Creates (or adopts) the tab. A valid quarter already in B2 is kept (resetTabsToCurrentQuarter moves it on request);
+// new tabs and tabs copied from an old workbook get the A1:A2 markers and the current quarter.
 function teamSheet(team) {
   const ss = SpreadsheetApp.getActive();
   const sheet = ss.getSheetByName(team) || ss.insertSheet(team);
-  const b1 = String(sheet.getRange('B1').getValue()).trim();
-  sheet.getRange('A1:B2').setValues([['Team', b1 || team], ['Quarter', defaultQuarter()]]);
+  const [[, b1], [, b2]] = sheet.getRange('A1:B2').getValues();
+  let quarter = String(b2).trim();
+  try { parseQuarter(quarter); } catch (e) { quarter = defaultQuarter(); }
+  sheet.getRange('A1:B2').setValues([['Team', String(b1).trim() || team], ['Quarter', quarter]]);
   return sheet;
 }
 

@@ -90,6 +90,23 @@ test('a plain team is fetched once and never goes through the roll-up path', () 
   assert.equal(view.current.endingArr, 14052851.2);
 });
 
+test('teamSheet keeps a valid quarter already in B2 and only fills in a missing / invalid one', () => {
+  const sheets = {};
+  const fakeSheet = (name, values) => {
+    const cells = { 'A1:B2': values };
+    return { name, getRange: a1 => ({ getValue: () => cells[a1] && cells[a1][0][1], getValues: () => cells['A1:B2'], setValues: v => { cells['A1:B2'] = v; } }), values: () => cells['A1:B2'] };
+  };
+  const ctx = mainContext({
+    SpreadsheetApp: { getActive: () => ({ getSheetByName: name => sheets[name] || null, insertSheet: name => (sheets[name] = fakeSheet(name, [['', ''], ['', '']])) }) },
+  });
+  const today = ctx.defaultQuarter();
+  sheets['Europe - DACH'] = fakeSheet('Europe - DACH', [['Team', 'Europe - DACH'], ['Quarter', 'Q1-2026']]);
+  sheets['Japan'] = fakeSheet('Japan', [['', 'Japan'], ['', 'last quarter']]);
+  assert.deepEqual(ctx.teamSheet('Europe - DACH').values(), [['Team', 'Europe - DACH'], ['Quarter', 'Q1-2026']]);
+  assert.deepEqual(ctx.teamSheet('Japan').values(), [['Team', 'Japan'], ['Quarter', today]]);
+  assert.deepEqual(ctx.teamSheet('Europe').values(), [['Team', 'Europe'], ['Quarter', today]]);
+});
+
 test('tabs default to the quarter we are in today', () => {
   const ctx = mainContext({});
   const today = new Date().toISOString().slice(0, 10);

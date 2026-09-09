@@ -52,8 +52,8 @@ quarter = `FiscalYear` / `FiscalQuarter` (FY26 Q1 starts 1 Feb 2026), Major = `A
   Salesforce record; `Raw Data` carries the URLs as columns.
 - **Europe** tab = roll-up of `Europe - Nordics/Benelux/UKI/DACH/South` (`ROLLUP_TEAMS`): opportunities keep their sub-team,
   goals and ledger rows are summed. `Europe` itself is never a Salesforce team.
-- **Quarter default**: new tabs open on the fiscal quarter containing today; **QBR → Point all team tabs at the current quarter**
-  resets every tab's `B2`.
+- **Quarter default**: new tabs open on the fiscal quarter containing today; a tab that already has a valid quarter in `B2` keeps it.
+  **QBR → Point all team tabs at the current quarter** moves every tab's `B2` to today's quarter and refreshes.
 
 ## Setup
 
