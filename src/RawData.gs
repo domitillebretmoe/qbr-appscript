@@ -2,7 +2,7 @@
 // filter to their tab and tie the numbers out. Refreshing a tab replaces that tab's rows only.
 const RAW_HEADER = ['Tab', 'Resolved Team', 'Quarter', 'Account', 'Opportunity', 'Stage', 'Type', 'Record Type', 'Bucket',
   'Close Date', 'Delta ARR', 'Expected Delta ARR', 'Expected Logo Impact', 'Major Account', 'Group', 'Opp Team', 'Owner',
-  'Lost Reason', 'Salesforce Id'];
+  'Lost Reason', 'Salesforce Id', 'Opportunity URL', 'Account URL'];
 const RAW_MONEY_COLS = [11, 12];
 
 // How the opportunity is counted in the metrics (see Definitions).
@@ -15,7 +15,7 @@ function rawBucket(opp) {
 function rawRow(tab, opp) {
   return [tab, opp.team, opp.quarter, opp.account, opp.name, opp.stage, opp.type, opp.recordType, rawBucket(opp),
     opp.closeDate, opp.deltaArr, opp.expectedDeltaArr, opp.expectedLogoImpact, opp.major ? 'Yes' : 'No', opp.oppGroup, opp.oppTeam,
-    opp.owner, opp.lostReason, opp.id];
+    opp.owner, opp.lostReason, opp.id, opp.url || '', opp.accountUrl || ''];
 }
 
 function rawSheet() {
@@ -50,5 +50,6 @@ function writeRawData(tab, opps) {
   [4, 5].forEach(c => sheet.setColumnWidth(c, 220));
   sheet.setColumnWidth(9, 170);
   sheet.setColumnWidth(18, 200);
+  sheet.setColumnWidths(20, 2, 260);
   return sheet;
 }

@@ -8,6 +8,8 @@ const isRenewal = opp => RENEWAL_RECORD_TYPES.indexOf(opp.recordType) >= 0;
 const isWon = opp => opp.stage === 'Closed Won';
 const isLost = opp => opp.stage === 'Closed Lost';
 const inQuarter = (opps, quarter) => opps.filter(o => o.quarter === quarter);
+const byField = (rows, field, descending) => rows.slice().sort((a, b) => (descending ? b[field] - a[field] : a[field] - b[field]));
+const TOP_N = 10;
 
 // Closed-quarter actuals. Net Added = Sum of Closed Won Delta ARR + Sum of Closed Lost renewal Delta ARR.
 function quarterMetrics(opps, quarter, goal) {
@@ -51,6 +53,15 @@ function quarterMetrics(opps, quarter, goal) {
     logosWon: unique(won.filter(o => o.type === 'Land').map(o => o.account)),
     logosLost: unique(fullChurn.map(o => o.account)),
     newLogos: won.filter(o => o.type === 'Land').length,
+    // Opportunity lists behind the linked tables on the tab.
+    lists: {
+      logosWon: byField(won.filter(o => o.type === 'Land'), 'deltaArr', true),
+      lostPipeline: byField(lostPipeline, 'deltaArr', true),
+      churned: byField(fullChurn, 'deltaArr', false),
+      downgrades: byField(downgrades, 'deltaArr', false),
+      renewalsWon: byField(wonRenewals, 'deltaArr', true),
+      renewalsLost: byField(fullChurn, 'deltaArr', false),
+    },
   };
 }
 
@@ -64,7 +75,8 @@ function forecastMetrics(opps, quarter, startingArr, goal) {
   const forecastArr = sum(landExpand, 'expectedDeltaArr') + sum(renewalUp, 'expectedDeltaArr');
   const forecastChurnArr = sum(churn, 'expectedDeltaArr');
   const netForecastArr = forecastArr + forecastChurnArr;
-  const pipelineArr = sum(rows.filter(o => !o.isClosed), 'deltaArr');
+  const open = rows.filter(o => !o.isClosed);
+  const pipelineArr = sum(open, 'deltaArr');
 
   return {
     quarter,
@@ -80,6 +92,7 @@ function forecastMetrics(opps, quarter, startingArr, goal) {
     forecastChurnArr,
     forecastChurnCount: churn.filter(o => o.expectedLogoImpact < 0).length,
     forecastEndingArr: startingArr + netForecastArr,
+    topDeals: byField(open, 'deltaArr', true).slice(0, TOP_N),
   };
 }
 
@@ -94,6 +107,9 @@ function accountMetrics(accounts, opps, quarter) {
     enterpriseCustomers: active.filter(a => !a.major).length,
     activatedProspects: activated.length,
     conversionRate: ratio(wonLands.length, wonLands.length + activated.length),
+    activeArr: sum(active, 'currentArr'),
+    topMajors: byField(active.filter(a => a.major), 'currentArr', true).slice(0, TOP_N),
+    topEnterprise: byField(active.filter(a => !a.major), 'currentArr', true).slice(0, TOP_N),
   };
 }
 

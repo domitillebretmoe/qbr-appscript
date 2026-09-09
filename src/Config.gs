@@ -37,6 +37,15 @@ const TEAM_SEEDS = [
 
 const TEAMS = TEAM_SEEDS.map(row => row[0]);
 
+// Roll-up tabs: a view over several teams. Opportunities stay attributed to their specific team; the roll-up sums
+// the members' opportunities, accounts and goals, and its Starting/Ending ARR is the sum of the members' ARR Ledger
+// rows (a roll-up never gets ledger rows of its own).
+const ROLLUP_TEAMS = { Europe: TEAMS.filter(team => team.indexOf('Europe - ') === 0) };
+
+function rollupMembers(team) {
+  return ROLLUP_TEAMS[String(team).trim()] || null;
+}
+
 // Region-level segments that must never be used as a team: opportunities are always attributed to the most
 // specific sub-team (e.g. Europe - DACH, Europe Majors - UKI), never to "Europe".
 const REGION_SEGMENTS = ['Europe', 'Asia', 'US Majors'];

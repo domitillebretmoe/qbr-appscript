@@ -24,11 +24,15 @@ class FakeSheet {
     this.hiddenGridlines = false;
     this.filter = null;
     this.tabColor = null;
+    this.maxRows = 1000;
+    this.maxColumns = 26;
   }
   cell(r, c) { return this.cells[`${r},${c}`] || (this.cells[`${r},${c}`] = { row: r, col: c }); }
   getName() { return this.name; }
-  getMaxRows() { return 1000; }
-  getMaxColumns() { return 40; }
+  getMaxRows() { return this.maxRows; }
+  getMaxColumns() { return this.maxColumns; }
+  insertRowsAfter(after, n) { this.maxRows += n; return this; }
+  insertColumnsAfter(after, n) { this.maxColumns += n; return this; }
   getLastRow() { return Math.max(0, ...Object.values(this.cells).map(c => c.row)); }
   getRange(a, b, c, d) {
     if (typeof a === 'string') {
@@ -38,7 +42,11 @@ class FakeSheet {
       const r2 = m[3] ? Number(m[4]) : r1; const c2 = m[3] ? col(m[3]) : c1;
       return new FakeRange(this, r1, c1, r2 - r1 + 1, c2 - c1 + 1);
     }
-    return new FakeRange(this, a, b, c == null ? 1 : c, d == null ? 1 : d);
+    const range = new FakeRange(this, a, b, c == null ? 1 : c, d == null ? 1 : d);
+    if (range.row + range.rows - 1 > this.maxRows || range.col + range.cols - 1 > this.maxColumns) {
+      throw new Error(`${this.name}: range ${range.getA1Notation()} is outside the sheet (${this.maxRows} x ${this.maxColumns})`);
+    }
+    return range;
   }
   getCharts() { return this.charts.slice(); }
   removeChart(chart) { this.charts = this.charts.filter(c => c !== chart); }
@@ -71,7 +79,8 @@ class FakeRange {
   getValue() { return this.getValues()[0][0]; }
   setValues(values) { return this.each((cell, r, c) => { cell.value = values[r][c]; }); }
   setValue(v) { return this.style('value', v); }
-  setRichTextValue(rt) { return this.each(cell => { cell.value = rt.text; cell.richText = rt.runs; }); }
+  setRichTextValue(rt) { return this.each(cell => { cell.value = rt.text; cell.richText = rt.runs; cell.link = rt.link; }); }
+  setRichTextValues(values) { return this.each((cell, r, c) => { cell.value = values[r][c].text; cell.richText = values[r][c].runs; cell.link = values[r][c].link; }); }
   setNumberFormat(f) { return this.style('numberFormat', f); }
   setBackground(v) { return this.style('background', v); }
   setFontColor(v) { return this.style('fontColor', v); }
@@ -114,9 +123,10 @@ const builder = (state = {}) => new Proxy({}, {
 });
 
 const richText = () => {
-  const rt = { text: '', runs: [] };
+  const rt = { text: '', runs: [], link: '' };
   return {
     setText(t) { rt.text = t; return this; },
+    setLinkUrl(url) { rt.link = url; return this; },
     setTextStyle(start, end, style) { rt.runs.push({ start, end, style }); return this; },
     build() { return rt; },
   };

@@ -14,6 +14,8 @@ function definitionRows() {
     ['Scope', 'Exclusions', `Accounts named "Test"; opportunities owned by ${owners} (as in the FY26 QBR COCKPIT report).`, 'Account.Name, Opportunity.Owner.Name'],
     ['Scope', 'Renewal', `Opportunity record type ${renewalTypes}.`, 'Opportunity.RecordType.Name'],
     ['Scope', 'Major account', 'Account with Major - Admin Tag = true.', 'Account.Major_Admin_Tag__c'],
+    ['Scope', 'Roll-up tab', `${Object.keys(ROLLUP_TEAMS).map(t => `"${t}" = ${ROLLUP_TEAMS[t].join(' + ')}`).join('; ')}. Opportunities stay attributed to their specific team; the roll-up sums the members' opportunities, accounts, goals and ARR Ledger rows.`, '-'],
+    ['Scope', 'Links', 'Every account / opportunity name in the tables links to its Salesforce record (Lightning URL). Raw Data has the URLs as columns.', 'Opportunity.Id, AccountId'],
 
     ['Quarter actuals', 'Revenue Goal', 'Sum of Goal Value of "Net ARR" goals whose Period Start falls in the quarter, over every Salesforce team matching B1.', 'Goal__c: Goal_Type__c = "Net ARR", Value__c, Period_Start__c, Team2__c'],
     ['Quarter actuals', 'Net Added ARR', 'Sum of Delta ARR of Closed Won opportunities + Sum of Delta ARR of Closed Lost renewals.', 'Opportunity.NACV__c, StageName'],
@@ -34,12 +36,16 @@ function definitionRows() {
     ['Quarter actuals', 'Renewal rate (%)', 'Won renewals / (won renewals + lost renewals).', '-'],
     ['Quarter actuals', 'Top churns', 'Three downgrades / full churns with the most negative Delta ARR.', 'Opportunity.NACV__c'],
     ['Quarter actuals', 'Churn reasons', 'Distinct Closed Lost reasons of the downgrades / full churns.', 'Opportunity.Closed_Lost_Reason_List__c, Closed_Lost_Reason__c'],
-    ['Quarter actuals', 'Logos won / lost', 'Distinct accounts of Closed Won "Land" opportunities / of Closed Lost renewals.', 'Opportunity.Type, Account.Name'],
-    ['Quarter actuals', 'Lost pipeline # / $', 'Closed Lost non-renewal opportunities: count and Sum of Delta ARR.', 'Opportunity.NACV__c'],
+    ['Quarter actuals', 'Logos Won (table)', 'Closed Won "Land" opportunities of the quarter, largest Delta ARR first.', 'Opportunity.Type, StageName'],
+    ['Quarter actuals', 'Lost Pipeline (table) / Lost pipeline # / $', 'Closed Lost non-renewal opportunities (Land, Expand...): list, count and Sum of Delta ARR. This is lost pipeline, not churn.', 'Opportunity.NACV__c, RecordType'],
+    ['Quarter actuals', 'Churned Customers (table)', 'Closed Lost renewals of the quarter (the full churns), most negative Delta ARR first. Same rows as Renewals Lost.', 'Opportunity.RecordType, StageName'],
+    ['Quarter actuals', 'Downgrade Customers (table)', 'Closed Won renewals with Delta ARR < 0, most negative first.', 'Opportunity.RecordType, NACV__c'],
+    ['Quarter actuals', 'Renewals Won / Renewals Lost (tables)', 'Closed Won renewals (incl. downgrades) / Closed Lost renewals of the quarter: the numerator and the rest of the denominator of the renewal rate.', 'Opportunity.RecordType, StageName'],
 
     ['Accounts (as of refresh)', 'Active customers', 'Accounts of the team with Current ARR > 0; Major / Enterprise split by the Major tag.', 'Account.Current_ARR__c, Major_Admin_Tag__c'],
     ['Accounts (as of refresh)', 'Activated prospects', 'Accounts of the team with Current ARR <= 0 and at least one open opportunity (any close date, excluded owners ignored).', 'Account.Current_ARR__c, Opportunity.IsClosed'],
     ['Accounts (as of refresh)', 'Conversion (%)', 'Closed Won "Land" opportunities in the quarter / (those + activated prospects).', '-'],
+    ['Accounts (as of refresh)', 'Top 10 Major / Enterprise Customers (tables)', 'Active customers (Current ARR > 0) with / without the Major tag, ten largest by Current ARR; % = share of the team\'s total active Current ARR.', 'Account.Current_ARR__c, Major_Admin_Tag__c'],
 
     ['Future quarters (Q+1, Q+2)', 'Net Forecast', 'Sum of Expected Delta ARR of Land + Expand (non-renewal) opportunities + renewals with Expected Delta ARR > 0 + Forecast churn.', 'Opportunity.Expected_NACV__c, Type, RecordType'],
     ['Future quarters (Q+1, Q+2)', 'Forecast churn ARR / #', 'Renewals with Expected Delta ARR < 0: Sum of Expected Delta ARR; count = those of them with Expected Logo Impact < 0 (expected full churns).', 'Opportunity.Expected_NACV__c, Expected_Logo_Impact__c'],
@@ -48,11 +54,13 @@ function definitionRows() {
     ['Future quarters (Q+1, Q+2)', 'Pipeline', 'Sum of Delta ARR of open (not closed) opportunities in the quarter.', 'Opportunity.NACV__c, IsClosed'],
     ['Future quarters (Q+1, Q+2)', 'Coverage', 'Pipeline / Revenue Goal.', '-'],
     ['Future quarters (Q+1, Q+2)', 'Forecast Ending ARR', 'Starting ARR (previous quarter\'s Ending / Forecast Ending ARR) + Net Forecast.', '-'],
+    ['Future quarters (Q+1, Q+2)', 'Top 10 Deals (tables)', 'Open opportunities closing in the quarter, ten largest by Delta ARR, with stage, close date and owner.', 'Opportunity.IsClosed, NACV__c, StageName, CloseDate'],
 
     ['Partner contribution', 'Partner Net Added ARR / new logos / churn $ / churn #', `Same definitions as the quarter actuals, restricted to the team's opportunities in the "${PARTNER_GROUP}" group (as in the FY26 QBR COCKPIT - Partners report).`, 'Opportunity.Group__c'],
 
     ['ARR Ledger', 'Rows', 'One row per team and quarter: Starting ARR, Net Added ARR, Ending ARR, Source. Starting = previous quarter\'s Ending; Ending = Starting + Net Added.', 'ARR Ledger tab'],
     ['ARR Ledger', 'Source', `"${SEED_SOURCE}" rows (Q1-2026, Q2-2026) are fixed values from last quarter's workbook. Rows stamped "Salesforce <date>" are recomputed on every refresh. Any other text (e.g. "Locked") freezes the row as typed.`, '-'],
+    ['ARR Ledger', 'Roll-up tabs', 'A roll-up tab (e.g. Europe) has no ledger rows: its Starting / Ending ARR is the sum of its member teams\' rows for the quarter.', '-'],
     ['Raw Data', 'Rows', 'Every Salesforce opportunity fetched for a team tab (all fiscal quarters from Q1-2026 to Q+2), one row each, with the Bucket it is counted in: Closed Won - Land/Expand, Won renewal, Won renewal - downgrade, Full churn, Lost pipeline, Open pipeline. Filter on Tab + Quarter to tie a metric out. Refreshing a tab replaces that tab\'s rows.', 'Raw Data tab'],
   ];
 }

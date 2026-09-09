@@ -45,7 +45,15 @@ quarter = `FiscalYear` / `FiscalQuarter` (FY26 Q1 starts 1 Feb 2026), Major = `A
   **Pipeline** = Σ Delta ARR of open opportunities; **coverage** = pipeline / revenue goal.
 - **Active customers** = accounts with Current ARR > 0 (split by Major tag). **Activated prospects** = accounts with no ARR and an open opportunity.
   **Conversion** = Closed Won Lands / (Closed Won Lands + activated prospects). Account counts are as of the refresh.
-- **Lost pipeline** = Closed Lost non-renewal opportunities in the quarter (count, Σ Delta ARR).
+- **Lost pipeline** = Closed Lost non-renewal opportunities in the quarter (count, Σ Delta ARR). It is not churn:
+  **Churned Customers** = Closed Lost renewals, **Downgrade Customers** = Closed Won renewals with Delta ARR < 0.
+- **Tables**: Logos Won, Lost Pipeline, Churned / Downgrade Customers, Renewals Won / Lost, Top 10 Major / Enterprise
+  customers (by Current ARR) and Top 10 open deals for Q+1 / Q+2 (by Delta ARR). Every account / opportunity name links to its
+  Salesforce record; `Raw Data` carries the URLs as columns.
+- **Europe** tab = roll-up of `Europe - Nordics/Benelux/UKI/DACH/South` (`ROLLUP_TEAMS`): opportunities keep their sub-team,
+  goals and ledger rows are summed. `Europe` itself is never a Salesforce team.
+- **Quarter default**: new tabs open on the fiscal quarter containing today; **QBR → Point all team tabs at the current quarter**
+  resets every tab's `B2`.
 
 ## Setup
 
@@ -61,7 +69,7 @@ quarter = `FiscalYear` / `FiscalQuarter` (FY26 Q1 starts 1 Feb 2026), Major = `A
    ```
 3. Reload the sheet. Menu **QBR → Set Salesforce credentials…** and enter the My Domain URL
    (`https://<domain>.my.salesforce.com`), consumer key and secret. They live in Script Properties, not in the sheet.
-4. **QBR → Set up workbook** creates the `Definitions` tab, the `ARR Ledger` (seeded) and one tab per team, then refreshes
+4. **QBR → Set up workbook** creates the `Definitions` tab, the `ARR Ledger` (seeded), one tab per team and the `Europe` roll-up, then refreshes
    them all (a run that would exceed Apps Script's 6-minute limit continues by itself in the background).
    **QBR → Refresh on B1/B2 edit** installs the trigger so changing the team or quarter on a tab re-populates it.
 

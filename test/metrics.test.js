@@ -7,7 +7,9 @@ const vm = require('node:vm');
 const ctx = vm.createContext({});
 ['Config.gs', 'Metrics.gs', 'Definitions.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 const { quarterMetrics, forecastMetrics, accountMetrics, partnerMetrics, shiftQuarter, quarterOfDate, teamToken, quartersBetween,
-  teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions } = ctx;
+  teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions, rollupMembers } = ctx;
+const ROLLUP_TEAMS = vm.runInContext('ROLLUP_TEAMS', ctx);
+const TEAMS = vm.runInContext('TEAMS', ctx);
 
 const { opp, dach } = require('./fixtures');
 
@@ -71,11 +73,42 @@ test('account and partner metrics', () => {
     { id: 'BMW Group', major: true, currentArr: 0 }, { id: 'Prospect', major: false, currentArr: 0, hasOpenOpp: true },
   ];
   const a = accountMetrics(accounts, dach, 'Q2-2026');
-  assert.deepEqual(a, { activeCustomers: 2, majorCustomers: 1, enterpriseCustomers: 1, activatedProspects: 1, conversionRate: 0.5 });
+  const { topMajors, topEnterprise, ...counts } = a;
+  assert.deepEqual(counts, { activeCustomers: 2, majorCustomers: 1, enterpriseCustomers: 1, activatedProspects: 1, conversionRate: 0.5, activeArr: 270000 });
+  assert.deepEqual(topMajors.map(x => x.id), ['Helaba']);
+  assert.deepEqual(topEnterprise.map(x => x.id), ['Serrala']);
   const p = partnerMetrics(dach, 'Q1-2026');
   assert.deepEqual(p, { partnerNetAddedArr: 0, partnerNewLogos: 0, partnerChurnArr: 0, partnerChurnCustomers: 0 });
   const partnerWin = opp('Q3-2026', 'Closed Won', 'Zalando', 'Land', 'Enterprise', 90000, 1, { oppGroup: 'Partnerships', oppTeam: 'Europe - DACH' });
   assert.deepEqual(partnerMetrics(dach.concat(partnerWin), 'Q3-2026'), { partnerNetAddedArr: 90000, partnerNewLogos: 1, partnerChurnArr: 0, partnerChurnCustomers: 0 });
+});
+
+test('Q3-2026 lists: churned = Closed Lost renewals, downgrades = Closed Won renewals < 0, lost pipeline = Closed Lost non-renewal', () => {
+  const m = quarterMetrics(dach, 'Q3-2026', { revenue: 7500000, logos: 2 });
+  const names = rows => rows.map(o => o.account);
+  assert.deepEqual(names(m.lists.logosWon), ['Zalando']);
+  assert.deepEqual(names(m.lists.churned), ['Bolt']);
+  assert.deepEqual(names(m.lists.renewalsLost), ['Bolt']);
+  assert.deepEqual(names(m.lists.downgrades), ['Julius Baer']);
+  assert.deepEqual(names(m.lists.renewalsWon), ['CompuGroup', 'Julius Baer']);
+  assert.deepEqual(names(m.lists.lostPipeline), ['Siemens']);
+  assert.equal(m.netAddedArr, 96000 + 12000 - 30000 - 84000);
+  assert.equal(m.renewalRate, 2 / 3);
+  m.lists.churned.concat(m.lists.logosWon).forEach(o => {
+    assert.match(o.url, /\/lightning\/r\/Opportunity\/006\d{15}\/view$/);
+    assert.match(o.accountUrl, /\/lightning\/r\/Account\/001[A-Za-z0-9]{15}\/view$/);
+  });
+  const f = forecastMetrics(dach, 'Q4-2026', 0, {});
+  assert.deepEqual(f.topDeals.map(o => [o.account, o.deltaArr]), [['BMW Group', 540000], ['DKB', 120000], ['CompuGroup', 0]]);
+  assert.ok(f.topDeals.every(o => !o.isClosed));
+});
+
+test('Europe is a roll-up of the five Europe sub-teams, never a team of its own', () => {
+  assert.deepEqual(ROLLUP_TEAMS.Europe, ['Europe - Nordics', 'Europe - Benelux', 'Europe - UKI', 'Europe - DACH', 'Europe - South']);
+  assert.deepEqual(rollupMembers('Europe'), ROLLUP_TEAMS.Europe);
+  assert.equal(rollupMembers('Europe - DACH'), null);
+  assert.ok(!TEAMS.includes('Europe'));
+  assert.throws(() => assertSpecificTeam('Europe'), /region/);
 });
 
 test('forecast never double counts a renewal-record-type opp typed Expand', () => {
