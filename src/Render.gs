@@ -3,16 +3,16 @@
 const DATA_COL = 20;
 const LAST_COL = 14; // N
 const PAGE_ROWS = 600;
-const FORMATS = { money: '$#,##0;[Red]($#,##0)', pct: '0.0%', int: '0', text: '@', date: 'yyyy-mm-dd' };
+const FORMATS = { money: '$#,##0;[Red]($#,##0)', pct: '0.0%', int: '0', mult: '0.0"x"', text: '@', date: 'yyyy-mm-dd' };
 // Chart labels and axes pick up the number format of the source cells.
 const CHART_FORMATS = { money: '$#,##0.00,,"M";[Red]-$#,##0.00,,"M"', pct: '0%', int: '0' };
 // Sparklines need a few quarters before they say anything.
 const MIN_TREND_QUARTERS = 4;
 // Attainment-style percentages get red / amber / green instead of a data bar.
-const RAG_KEYS = ['attainment', 'logoAttainmentPct', 'netForecastPct'];
+const RAG_KEYS = ['attainment', 'logoAttainmentPct', 'netForecastPct', 'pace'];
 const RAG = { amber: 0.7, green: 1 };
 const TABLE_WIDTH = 6;
-const NUMERIC_KINDS = ['money', 'pct', 'int'];
+const NUMERIC_KINDS = ['money', 'pct', 'int', 'mult'];
 // Cognition palette: warm off-white page, near-black ink, electric-blue accent, flat white cards.
 const FONT = 'Inter';
 const COLORS = {
@@ -37,6 +37,10 @@ const PREVIOUS_ROWS = [
   ['Revenue Goal', 'money', 'revenueGoal'],
   ['Net Added ARR', 'money', 'netAddedArr'],
   ['Attainment (%)', 'pct', 'attainment'],
+  ['Quarter elapsed (%)', 'pct', 'quarterElapsedPct'],
+  ['Pace (attainment / elapsed)', 'pct', 'pace'],
+  ['Open pipeline (this quarter)', 'money', 'openPipelineArr'],
+  ['Pipeline coverage of remaining goal', 'mult', 'pipelineCoverage'],
   ['Logo Goal', 'int', 'logoGoal'],
   ['Logo Attainment', 'int', 'logoAttainment'],
   ['Logo Attainment (%)', 'pct', 'logoAttainmentPct'],
@@ -57,6 +61,8 @@ const ARR_ROWS = [
   ['Full Churn #', 'int', 'fullChurnCount'],
   ['Churn ARR', 'money', 'churnArr'],
   ['Ending ARR', 'money', 'endingArr'],
+  ['GRR (%)', 'pct', 'grr'],
+  ['NRR (%)', 'pct', 'nrr'],
 ];
 const ACCOUNT_ROWS = [
   ['# Active Customers', 'int', 'activeCustomers'],
@@ -74,7 +80,9 @@ const FUTURE_ROWS = [
   ['Logo Goal', 'int', 'logoGoal'],
   ['Net Forecast (#)', 'int', 'logoForecast'],
   ['Pipeline', 'money', 'pipelineArr'],
-  ['Pipeline coverage', 'pct', 'pipelineCoverage'],
+  ['Pipeline coverage of goal', 'mult', 'pipelineCoverage'],
+  ['# Renewals due', 'int', 'renewalsDueCount'],
+  ['ARR up for renewal', 'money', 'renewalArrDue'],
 ];
 const FUTURE_ARR_ROWS = [
   ['Starting ARR', 'money', 'startingArr'],
@@ -94,11 +102,66 @@ const OPP_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Type', 'tex
 const RENEWAL_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Record type', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
 const DEAL_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Stage', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
 const CUSTOMER_COLUMNS = [['#', 'int'], ['Account', 'link'], ['Team', 'text'], ['Current ARR', 'money'], ['% of active ARR', 'pct'], ['Open opp', 'text']];
+const RENEWAL_DUE_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Close date', 'date'], ['Current ARR', 'money'], ['Expected Delta ARR', 'money'], ['Owner', 'text']];
+const OWNER_COLUMNS = [['Owner', 'text'], ['Net Added ARR', 'money'], ['# Won', 'int'], ['Churn ARR', 'money'], ['Open pipeline (Q)', 'money'], ['Pipeline Q+1', 'money']];
+const QUALITY_COLUMNS = [['Issue', 'text'], ['Account', 'link'], ['Opportunity', 'link'], ['Detail', 'text'], ['Close date', 'date'], ['Owner', 'text']];
+
+// Hover note on each metric label (same definitions as the Definitions tab, in one line).
+const KPI_NOTES = {
+  revenueGoal: 'Net ARR goal for the team and quarter (Goals By Quarter - Net ARR report).',
+  netAddedArr: 'Delta ARR of Closed Won opportunities + Delta ARR of Closed Lost renewals (full churn), close date in the quarter.',
+  attainment: 'Net Added ARR / Revenue Goal. Green >= 100%, amber 70-99%, red < 70%.',
+  quarterElapsedPct: 'Calendar days of the quarter elapsed at refresh time / days in the quarter (100% once the quarter is over).',
+  pace: 'Attainment / Quarter elapsed: 100% = on a straight-line path to the goal, above = ahead, below = behind.',
+  openPipelineArr: 'Delta ARR of open opportunities with a close date in the selected quarter.',
+  pipelineCoverage: 'Open pipeline / remaining goal (goal - Net Added ARR); empty once the goal is met. Future quarters: pipeline / goal.',
+  logoGoal: 'New Logos goal for the quarter.',
+  logoAttainment: 'Sum of Expected Logo Impact on Major accounts (churned logos count -1).',
+  logoAttainmentPct: 'Logo Attainment / Logo Goal (attainment below 0 counts as 0).',
+  renewals: 'Won renewals + full churn (Closed Won + Closed Lost renewal opportunities).',
+  wonRenewals: 'Closed Won opportunities of record type Renewal or Fed - Renewal.',
+  renewalRate: 'Won renewals / (won renewals + full churn), by count.',
+  churnArr: 'Downgrade ARR (Closed Won renewals with negative Delta ARR) + Full Churn ARR (Closed Lost renewals).',
+  churnCustomers: 'Number of Closed Lost renewal opportunities (full churn).',
+  topChurns: 'Three largest churn or downgrade amounts in the quarter.',
+  churnReasons: 'Distinct Closed Lost reasons on the churn and downgrade opportunities.',
+  startingArr: 'Ending ARR of the previous quarter (ARR Ledger). Roll-up tabs sum their member teams.',
+  addedArr: 'Net Added ARR - Churn ARR: the gross ARR added by won opportunities.',
+  downgradeArr: 'Delta ARR of Closed Won renewals with negative Delta ARR.',
+  downgradeCount: 'Number of Closed Won renewals with negative Delta ARR.',
+  fullChurnArr: 'Delta ARR of Closed Lost renewals.',
+  fullChurnCount: 'Number of Closed Lost renewals.',
+  endingArr: 'Starting ARR + Net Added ARR (seeded quarters keep the FY27 QBR Cockpit values).',
+  grr: 'Gross revenue retention: (Starting ARR + Downgrade ARR + Full Churn ARR) / Starting ARR.',
+  nrr: 'Net revenue retention: GRR plus expansion from existing customers (won ARR that is not a new logo) / Starting ARR.',
+  activeCustomers: 'Accounts with Current ARR > 0.',
+  majorCustomers: 'Active customers with the Major admin tag.',
+  enterpriseCustomers: 'Active customers without the Major admin tag.',
+  activatedProspects: 'Accounts with no ARR and at least one open opportunity.',
+  conversionRate: 'New logos won in the quarter / activated prospects.',
+  lostPipelineCount: 'Closed Lost opportunities that are not renewals (Land / Expand).',
+  lostPipelineArr: 'Delta ARR of Closed Lost non-renewal opportunities.',
+  netForecastArr: 'Expected Delta ARR of Land + Expand + renewals expected to grow, plus forecast churn (renewals expected to shrink).',
+  netForecastPct: 'Net Forecast / Revenue Goal.',
+  logoForecast: 'Sum of Expected Logo Impact on Major accounts in the quarter.',
+  pipelineArr: 'Delta ARR of open opportunities with a close date in the quarter.',
+  renewalsDueCount: 'Open renewal opportunities (Renewal / Fed - Renewal) with a close date in the quarter.',
+  renewalArrDue: 'Current ARR of the accounts with an open renewal in the quarter (each account counted once).',
+  forecastArr: 'Expected Delta ARR of Land + Expand + renewals expected to grow.',
+  forecastChurnArr: 'Expected Delta ARR of renewals expected to shrink.',
+  forecastChurnCount: 'Renewals expected to shrink whose Expected Logo Impact is negative (full churn expected).',
+  forecastEndingArr: 'Starting ARR + Net Forecast.',
+  partnerNetAddedArr: `Net Added ARR of opportunities in the ${PARTNER_GROUP} group.`,
+  partnerNewLogos: `New logos won through the ${PARTNER_GROUP} group.`,
+  partnerChurnArr: `Churn ARR of opportunities in the ${PARTNER_GROUP} group.`,
+  partnerChurnCustomers: `Full churn count in the ${PARTNER_GROUP} group.`,
+};
 
 // Metrics kept per quarter in the data area (drives sparklines and the trend chart).
 const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logoAttainmentPct', 'endingArr',
   'renewals', 'wonRenewals', 'renewalRate', 'churnArr', 'churnCustomers', 'activeCustomers', 'conversionRate', 'lostPipelineCount',
-  'lostPipelineArr', 'partnerNetAddedArr', 'partnerNewLogos', 'partnerChurnArr', 'partnerChurnCustomers'];
+  'lostPipelineArr', 'partnerNetAddedArr', 'partnerNewLogos', 'partnerChurnArr', 'partnerChurnCustomers', 'grr', 'nrr', 'pace',
+  'openPipelineArr', 'pipelineCoverage'];
 
 function renderTeamTab(sheet, view) {
   resetSheet(sheet, view.team, view.quarter);
@@ -150,12 +213,51 @@ function renderTeamTab(sheet, view) {
     oppTable(`Top 10 Deals Q+1 ${q1.quarter}`, 2, DEAL_COLUMNS, q1.topDeals, o => o.stage),
     oppTable(`Top 10 Deals Q+2 ${q2.quarter}`, 9, DEAL_COLUMNS, q2.topDeals, o => o.stage),
   ]) + 1;
+  const renewalsDue = (title, col, f) => ({
+    title: `${title} (${f.renewalsDueCount}, ${formatMoney(f.renewalArrDue)} up for renewal)`, col, columns: RENEWAL_DUE_COLUMNS,
+    rows: f.renewalsDue.map(o => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), o.closeDate || '', o.accountArr, o.expectedDeltaArr, o.owner || '']),
+  });
+  row = writeTables(sheet, row, [
+    renewalsDue(`Renewals due Q+1 ${q1.quarter}`, 2, q1),
+    renewalsDue(`Renewals due Q+2 ${q2.quarter}`, 9, q2),
+  ]) + 1;
 
   row = writeSection(sheet, row, 'PARTNER CONTRIBUTION', `Opportunities in the ${PARTNER_GROUP} group for this team`);
   row = writeBlock(sheet, row, 2, trendHeader('Metric'), PARTNER_ROWS, [view.current], previous, sparklines) + 1;
 
+  row = writeSection(sheet, row, 'OWNERS & DATA QUALITY', `${view.quarter} by opportunity owner; Salesforce hygiene across ${view.quarter}, ${q1.quarter} and ${q2.quarter}`);
+  const owners = view.owners || [];
+  const issues = view.dataQuality || [];
+  row = writeTables(sheet, row, [
+    { title: `Owner performance (${owners.length})`, col: 2, columns: OWNER_COLUMNS,
+      rows: owners.map(o => [o.owner || '-', o.netAddedArr, o.wonCount, o.churnArr, o.openPipelineArr, o.nextPipelineArr]) },
+    { title: `Data quality (${issues.length} ${issues.length === 1 ? 'issue' : 'issues'})`, col: 9, columns: QUALITY_COLUMNS,
+      rows: issues.map(i => (i.opp
+        ? [i.issue, link(i.opp.account, i.opp.accountUrl), link(i.opp.url ? 'Link' : '-', i.opp.url), i.detail, i.opp.closeDate || '', i.opp.owner || '']
+        : [i.issue, link(i.account.name, i.account.url), '-', i.detail, '', i.account.owner || ''])) },
+  ]) + 1;
+
   row = writeSection(sheet, row, 'CHARTS', `${view.quarter} bridge, attainment, renewals, forecast and trend since ${FIRST_QUARTER}`);
-  writeCharts(sheet, row, view, trend);
+  const lastRow = writeCharts(sheet, row, view, trend);
+  writePdfLink(sheet, lastRow);
+}
+
+// One-click PDF of the dashboard area (landscape, fit to width, no gridlines) through the Sheets export endpoint;
+// it opens in the browser with the user's own Google session, so the script needs no Drive scope.
+function pdfExportUrl(sheet, lastRow) {
+  const params = {
+    format: 'pdf', gid: sheet.getSheetId(), size: 'A4', portrait: false, fitw: true, scale: 4,
+    gridlines: false, printtitle: false, sheetnames: false, pagenumbers: false, fzr: false, horizontal_alignment: 'CENTER',
+    top_margin: 0.3, bottom_margin: 0.3, left_margin: 0.3, right_margin: 0.3,
+    r1: 0, c1: 0, r2: lastRow, c2: LAST_COL + 1,
+  };
+  const query = Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join('&');
+  return `https://docs.google.com/spreadsheets/d/${sheet.getParent().getId()}/export?${query}`;
+}
+
+function writePdfLink(sheet, lastRow) {
+  sheet.getRange(2, LAST_COL - 1, 1, 2).merge().setHorizontalAlignment('right').setFontSize(8)
+    .setRichTextValue(SpreadsheetApp.newRichTextValue().setText('Download this tab as PDF').setLinkUrl(pdfExportUrl(sheet, lastRow)).build());
 }
 
 function resetSheet(sheet, team, quarter) {
@@ -215,6 +317,7 @@ function writeKpiCards(sheet, row, current, previous) {
       .setBorder(true, true, true, true, false, false, hero ? COLORS.ink : COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
     sheet.getRange(row, col, 1, span).merge().setValue(label.toUpperCase()).setFontSize(8).setFontColor(hero ? COLORS.onDark : COLORS.muted)
       .setHorizontalAlignment('left').setVerticalAlignment('bottom');
+    if (KPI_NOTES[key]) sheet.getRange(row, col).setNote(KPI_NOTES[key]);
     const value = sheet.getRange(row + 1, col, 1, span).merge().setValue(cellValue(kind, current[key])).setNumberFormat(FORMATS[kind])
       .setFontSize(hero ? 24 : 18).setFontWeight('bold').setFontColor(hero ? COLORS.card : COLORS.ink).setHorizontalAlignment('left').setVerticalAlignment('middle');
     if (RAG_KEYS.indexOf(key) >= 0) addRag(sheet, value, 'font');
@@ -259,6 +362,7 @@ function writeBlock(sheet, row, col, header, spec, values, previous, trend, shar
     .setBorder(null, null, true, null, false, false, COLORS.ink, SpreadsheetApp.BorderStyle.SOLID);
   sheet.getRange(row, col).setHorizontalAlignment('left');
   sheet.setRowHeight(row, 24);
+  spec.forEach(([, , key], i) => { if (KPI_NOTES[key]) sheet.getRange(row + 1 + i, col).setNote(KPI_NOTES[key]); });
 
   const range = sheet.getRange(row + 1, col, body.length, width);
   range.setValues(body).setBackground(COLORS.card).setFontColors(colors).setVerticalAlignment('middle');
@@ -286,6 +390,7 @@ function qoqText(kind, now, prev) {
   const arrow = now > prev ? '\u25B2 ' : '\u25BC ';
   const diff = Math.abs(now - prev);
   if (kind === 'pct') return `${arrow}${(diff * 100).toFixed(1)}pp`;
+  if (kind === 'mult') return `${arrow}${diff.toFixed(1)}x`;
   if (kind === 'money') return arrow + formatMoney(diff);
   return `${arrow}${diff}`;
 }
@@ -466,4 +571,5 @@ function writeCharts(sheet, row, view, trend) {
     .setOption('colors', [COLORS.ink])
     .setOption('legend', { position: 'none' })
     .setOption('vAxis', { viewWindow: { min: 0 } }), row, 8);
+  return row + rowsPerChart;
 }

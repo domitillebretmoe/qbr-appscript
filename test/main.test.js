@@ -9,6 +9,7 @@ function mainContext(stubs) {
   const ctx = vm.createContext(Object.assign({
     Utilities: { formatDate: d => d.toISOString().slice(0, 10) },
     Session: { getScriptTimeZone: () => 'UTC' },
+    fetchRegionOnlyAccounts: () => [],
   }, stubs));
   ['Config.gs', 'Metrics.gs', 'Main.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
   return ctx;
@@ -88,6 +89,23 @@ test('a plain team is fetched once and never goes through the roll-up path', () 
   assert.deepEqual(fetched, ['Europe - DACH']);
   assert.deepEqual(view.members, ['Europe - DACH']);
   assert.equal(view.current.endingArr, 14052851.2);
+});
+
+test('region-only accounts (Team = Europe, no sub-team) surface as a data-quality issue on the region tabs', () => {
+  const regions = [];
+  const ctx = mainContext({
+    fetchOpportunities: team => data(team).opps,
+    fetchAccounts: team => data(team).accounts,
+    fetchGoals: team => data(team).goals,
+    fetchRegionOnlyAccounts: team => { regions.push(team); return [{ id: '001F', name: 'Flutter Entertainment', url: 'u', team: 'Europe', currentArr: 50000, owner: 'Sam' }]; },
+    rollLedger: (team, quarter) => { const out = {}; ctx.quartersBetween('Q1-2026', quarter).forEach(q => { out[q] = data(team).ledger[q] || { startingArr: 0, endingArr: 0 }; }); return out; },
+  });
+  const view = ctx.buildView('Europe - DACH', 'Q3-2026');
+  assert.deepEqual(regions, ['Europe - DACH']);
+  const regionIssues = view.dataQuality.filter(i => i.account);
+  assert.equal(regionIssues.length, 1);
+  assert.equal(regionIssues[0].account.name, 'Flutter Entertainment');
+  assert.equal(regionIssues[0].issue, vm.runInContext('DATA_QUALITY_CHECKS.regionOnly', ctx));
 });
 
 test('teamSheet keeps a valid quarter already in B2 and only fills in a missing / invalid one', () => {

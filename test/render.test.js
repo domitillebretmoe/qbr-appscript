@@ -30,27 +30,20 @@ const previewAccounts = dachAccounts.concat([
 const ctx = vm.createContext(globals());
 ['Config.gs', 'Metrics.gs', 'Render.gs', 'RawData.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 
-// Same shape as buildView() in Main.gs, with the ledger replaced by the seeded DACH values.
-function sampleView(quarter = 'Q2-2026', opps = dach, accounts = dachAccounts) {
+// buildView() from Main.gs without Salesforce: the ledger is the seeded DACH values rolled forward with Net Added ARR.
+const TODAY = '2026-09-15';
+function sampleView(quarter = 'Q2-2026', opps = dach, accounts = dachAccounts, unassignedAccounts = []) {
   const goals = {
     'Q1-2026': { revenue: 2000000, logos: 0 }, 'Q2-2026': { revenue: 6700000, logos: 1 }, 'Q3-2026': { revenue: 7500000, logos: 2 },
     'Q4-2026': { revenue: 8000000, logos: 2 }, 'Q1-2027': { revenue: 8500000, logos: 3 },
   };
-  const goalFor = q => goals[q] || { revenue: 0, logos: 0 };
   const seed = vm.runInContext("TEAM_SEEDS.filter(s => s[0] === 'Europe - DACH')[0]", ctx);
   const ledger = { 'Q1-2026': { startingArr: seed[1], endingArr: seed[2] }, 'Q2-2026': { startingArr: seed[2], endingArr: seed[3] } };
-  const trend = ctx.quartersBetween(vm.runInContext('FIRST_QUARTER', ctx), quarter).map(q => {
-    const m = Object.assign(ctx.quarterMetrics(opps, q, goalFor(q)), ctx.accountMetrics(accounts, opps, q), ctx.partnerMetrics(opps, q));
+  ctx.quartersBetween(vm.runInContext('FIRST_QUARTER', ctx), quarter).forEach(q => {
     const prevEnding = ledger[ctx.shiftQuarter(q, -1)] ? ledger[ctx.shiftQuarter(q, -1)].endingArr : null;
-    ledger[q] = ledger[q] || { startingArr: prevEnding, endingArr: prevEnding + m.netAddedArr };
-    return ctx.withArr(m, ledger[q]);
+    ledger[q] = ledger[q] || { startingArr: prevEnding, endingArr: prevEnding + ctx.quarterMetrics(opps, q, {}).netAddedArr };
   });
-  const current = trend[trend.length - 1];
-  const next1 = ctx.shiftQuarter(quarter, 1);
-  const next2 = ctx.shiftQuarter(quarter, 2);
-  const future1 = ctx.forecastMetrics(opps, next1, current.endingArr, goalFor(next1));
-  const future2 = ctx.forecastMetrics(opps, next2, future1.forecastEndingArr, goalFor(next2));
-  return { team: 'Europe - DACH', members: ['Europe - DACH'], quarter, trend, current, future: [future1, future2], opps };
+  return ctx.composeView({ team: 'Europe - DACH', members: ['Europe - DACH'], quarter, opps, accounts, goals, ledgers: [ledger], unassignedAccounts, today: TODAY });
 }
 
 function render(view) {
@@ -200,11 +193,74 @@ test('every chart reads one contiguous block whose header row and data rows are 
   assert.equal(arr[arr.length - 1][1], sheet.cell(6, 7).value, 'Ending ARR chart ends on the KPI card value');
 });
 
+test('batch 2 sections: GRR/NRR, pace, coverage, renewals due, owners, data quality, hover notes, PDF link', () => {
+  const flutter = { id: '001F', name: 'Flutter Entertainment', url: 'https://sf/001F', team: 'Europe', currentArr: 50000, owner: 'Sam' };
+  const view = sampleView('Q3-2026', dach, dachAccounts, [flutter]);
+  const sheet = render(view);
+  const labelled = (label, col) => { const c = cellsWhere(sheet, x => x.value === label && x.col === col)[0]; assert.ok(c, label); return c; };
+  const valueOf = (label, col) => sheet.cell(labelled(label, col).row, col + 1);
+
+  // PREVIOUS QUARTER: elapsed, pace, open pipeline, coverage (as a multiple) with hover notes on the labels.
+  assert.equal(valueOf('Quarter elapsed (%)', 2).value, 45 / 92);
+  assert.equal(valueOf('Pace (attainment / elapsed)', 2).value, view.current.pace);
+  assert.equal(valueOf('Open pipeline (this quarter)', 2).value, 400000);
+  const coverage = valueOf('Pipeline coverage of remaining goal', 2);
+  assert.equal(coverage.value, 400000 / 7506000);
+  assert.equal(coverage.numberFormat, '0.0"x"');
+  assert.match(labelled('Pace (attainment / elapsed)', 2).note, /Attainment \/ Quarter elapsed/);
+  assert.match(labelled('GRR (%)', 7).note, /Gross revenue retention/);
+  assert.match(sheet.cell(5, 2).note, /Closed Won/, 'KPI card label carries a note');
+  // ARR bridge: GRR / NRR in dollars of Starting ARR.
+  assert.equal(valueOf('GRR (%)', 7).value, view.current.grr);
+  assert.equal(valueOf('NRR (%)', 7).value, view.current.nrr);
+  assert.ok(view.current.grr < 1 && view.current.nrr > view.current.grr);
+
+  // FUTURE: renewals due with the account ARR at stake, each row linked.
+  assert.equal(valueOf('# Renewals due', 2).value, 1);
+  assert.equal(valueOf('ARR up for renewal', 2).value, 410000);
+  const due = tableRows(sheet, 'Renewals due Q+1 Q4-2026');
+  assert.equal(due.title, 'Renewals due Q+1 Q4-2026 (1, $410K up for renewal)');
+  assert.deepEqual(due.headers, ['Account', 'Opportunity', 'Close date', 'Current ARR', 'Expected Delta ARR', 'Owner']);
+  assert.equal(due.rows[0][0].value, 'CompuGroup');
+  assert.equal(due.rows[0][0].link, accountUrl('CompuGroup'));
+  assert.equal(due.rows[0][1].value, 'Link');
+  assert.equal(due.rows[0][3].value, 410000);
+  assert.equal(due.rows[0][4].value, -30000);
+  assert.equal(tableRows(sheet, 'Renewals due Q+2 Q1-2027').rows[0][0].value, 'Zalando');
+
+  // OWNERS & DATA QUALITY
+  const values = Object.values(sheet.cells).map(c => c.value);
+  assert.ok(values.includes('OWNERS & DATA QUALITY'));
+  const owners = tableRows(sheet, 'Owner performance');
+  assert.deepEqual(owners.headers, ['Owner', 'Net Added ARR', '# Won', 'Churn ARR', 'Open pipeline (Q)', 'Pipeline Q+1']);
+  assert.deepEqual(owners.rows.map(r => r.map(c => c.value)), [['Anna Berger', -6000, 3, -114000, 400000, 660000]]);
+  const quality = tableRows(sheet, 'Data quality');
+  assert.deepEqual(quality.headers, ['Issue', 'Account', 'Opportunity', 'Detail', 'Close date', 'Owner']);
+  const stale = quality.rows.filter(r => r[0].value === 'Open with close date in the past');
+  assert.equal(stale.length, 7, 'fixture close dates are all before 2026-09-15');
+  assert.equal(stale[0][2].value, 'Link');
+  assert.match(stale[0][2].link, /\/lightning\/r\/Opportunity\//);
+  const region = quality.rows.find(r => r[0].value === 'Account team is a region only');
+  assert.equal(region[1].value, 'Flutter Entertainment');
+  assert.equal(region[1].link, 'https://sf/001F');
+  assert.equal(region[3].value, 'Team = Europe, no sub-team');
+  assert.equal(quality.title, `Data quality (${quality.rows.length} issues)`);
+
+  // PDF export link in the frozen header: this sheet, landscape, fit to width, dashboard columns only.
+  const pdf = sheet.cell(2, 13);
+  assert.equal(pdf.value, 'Download this tab as PDF');
+  assert.match(pdf.link, /^https:\/\/docs\.google\.com\/spreadsheets\/d\/SPREADSHEET_ID\/export\?format=pdf&gid=123456&/);
+  assert.match(pdf.link, /portrait=false/);
+  assert.match(pdf.link, /fitw=true/);
+  assert.match(pdf.link, /c2=15/);
+  assert.match(pdf.link, /r2=\d+/);
+});
+
 test('attainment cells get red/amber/green rules; sparklines only appear once four quarters exist', () => {
   const sheet = render(sampleView('Q3-2026'));
   const rag = sheet.rules.filter(r => r.when);
-  // KPI card (font) + Attainment (%) + Logo Attainment (%) + Net Forecast (%) = 4 ranges x 3 thresholds.
-  assert.equal(rag.length, 12);
+  // KPI card (font) + Attainment (%) + Pace + Logo Attainment (%) + Net Forecast (%) = 5 ranges x 3 thresholds.
+  assert.equal(rag.length, 15);
   assert.deepEqual(rag.slice(0, 3).map(r => r.when), [{ gte: 1 }, { between: [0.7, 0.9999] }, { lt: 0.7 }]);
   assert.ok(rag.slice(0, 3).every(r => r.fontColor && !r.background), 'card value coloured by font');
   assert.ok(rag.slice(3).every(r => r.background && !r.fontColor), 'table cells coloured by background');

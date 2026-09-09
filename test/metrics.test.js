@@ -7,11 +7,12 @@ const vm = require('node:vm');
 const ctx = vm.createContext({});
 ['Config.gs', 'Metrics.gs', 'Definitions.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 const { quarterMetrics, forecastMetrics, accountMetrics, partnerMetrics, shiftQuarter, quarterOfDate, teamToken, quartersBetween,
-  teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions, rollupMembers } = ctx;
+  teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions, rollupMembers, withArr, withPace, quarterElapsed,
+  quarterStart, ownerMetrics, dataQualityIssues } = ctx;
 const ROLLUP_TEAMS = vm.runInContext('ROLLUP_TEAMS', ctx);
 const TEAMS = vm.runInContext('TEAMS', ctx);
 
-const { opp, dach } = require('./fixtures');
+const { opp, dach, dachAccounts } = require('./fixtures');
 
 test('Q1-2026 DACH matches last quarter workbook', () => {
   const m = quarterMetrics(dach, 'Q1-2026', { revenue: 2000000, logos: 0 });
@@ -167,6 +168,92 @@ test('forecast churn count only counts renewals expected to shrink', () => {
   const f = forecastMetrics(rows, 'Q3-2026', 0, {});
   assert.equal(f.forecastChurnCount, 1);
   assert.equal(f.forecastChurnArr, -50000);
+});
+
+test('GRR / NRR are dollar-based on Starting ARR: churn + downgrades for GRR, plus existing-customer expansion for NRR', () => {
+  const m = quarterMetrics(dach, 'Q3-2026', { revenue: 7500000, logos: 2 });
+  // Won: Zalando Land 96k, CompuGroup renewal +12k, Julius Baer renewal -30k (downgrade); Bolt renewal lost -84k.
+  assert.equal(m.netAddedArr, -6000);
+  assert.equal(m.churnArr, -114000);
+  assert.equal(m.newLogoArr, 96000);
+  assert.equal(m.expansionArr, 12000);
+  const S = 13328250;
+  withArr(m, { startingArr: S, endingArr: S - 6000 });
+  assert.equal(m.grr, (S - 114000) / S);
+  assert.equal(m.nrr, (S - 114000 + 12000) / S);
+  assert.equal(withArr(quarterMetrics([], 'Q3-2026', {}), { startingArr: 0, endingArr: 0 }).grr, null);
+});
+
+test('current-quarter pipeline coverage = open pipeline / remaining goal, empty once the goal is met', () => {
+  const m = quarterMetrics(dach, 'Q3-2026', { revenue: 7500000, logos: 2 });
+  assert.equal(m.openPipelineArr, 400000); // Helaba 400k + Serrala 0
+  assert.equal(m.remainingGoal, 7506000);
+  assert.equal(m.pipelineCoverage, 400000 / 7506000);
+  const met = quarterMetrics(dach, 'Q3-2026', { revenue: -10000, logos: 0 });
+  assert.equal(met.remainingGoal, 0);
+  assert.equal(met.pipelineCoverage, null);
+});
+
+test('quarter elapsed and pace: attainment relative to the share of the quarter gone', () => {
+  assert.equal(quarterStart('Q3-2026'), '2026-08-01');
+  assert.equal(quarterStart('Q4-2026'), '2026-11-01');
+  assert.equal(quarterStart('Q1-2027'), '2027-02-01');
+  assert.equal(quarterElapsed('Q3-2026', '2026-08-01'), 0);
+  assert.equal(quarterElapsed('Q3-2026', '2026-09-15'), 45 / 92);
+  assert.equal(quarterElapsed('Q2-2026', '2026-09-15'), 1);
+  assert.equal(quarterElapsed('Q4-2026', '2026-09-15'), 0);
+  const m = withPace({ quarter: 'Q3-2026', attainment: 0.25 }, '2026-09-15');
+  assert.equal(m.quarterElapsedPct, 45 / 92);
+  assert.equal(m.pace, 0.25 / (45 / 92));
+  assert.equal(withPace({ quarter: 'Q3-2026', attainment: null }, '2026-09-15').pace, null);
+});
+
+test('future quarters list open renewals due with the account ARR at stake, each account counted once', () => {
+  const q4 = forecastMetrics(dach, 'Q4-2026', 0, {}, dachAccounts);
+  assert.equal(q4.renewalsDueCount, 1);
+  assert.equal(q4.renewalArrDue, 410000);
+  assert.deepEqual(q4.renewalsDue.map(o => [o.account, o.accountArr]), [['CompuGroup', 410000]]);
+  const twice = dach.concat([opp('Q4-2026', 'R1- Renewal Planning', 'CompuGroup', 'Renewal', 'Fed - Renewal', 0, 0)]);
+  assert.equal(forecastMetrics(twice, 'Q4-2026', 0, {}, dachAccounts).renewalsDueCount, 2);
+  assert.equal(forecastMetrics(twice, 'Q4-2026', 0, {}, dachAccounts).renewalArrDue, 410000);
+  assert.equal(forecastMetrics(dach, 'Q4-2026', 0, {}).renewalArrDue, 0);
+});
+
+test('owner table: net added, won count, churn and pipeline per opportunity owner, sorted by net added', () => {
+  const rows = [
+    opp('Q3-2026', 'Closed Won', 'A', 'Land', 'Enterprise', 100000, 1, { owner: 'Ben' }),
+    opp('Q3-2026', 'Closed Won', 'B', 'Renewal', 'Renewal', -20000, 0, { owner: 'Ben' }),
+    opp('Q3-2026', 'Closed Lost', 'C', 'Renewal', 'Renewal', -50000, -1, { owner: 'Anna' }),
+    opp('Q3-2026', '3- Proposal', 'D', 'Expand', 'Enterprise', 70000, 0, { owner: 'Anna' }),
+    opp('Q4-2026', '1- Discovery', 'E', 'Land', 'Enterprise', 30000, 1, { owner: 'Anna' }),
+    opp('Q4-2026', '1- Discovery', 'F', 'Land', 'Enterprise', 5000, 1, { owner: 'Chris' }),
+  ];
+  const owners = ownerMetrics(rows, 'Q3-2026', 'Q4-2026');
+  assert.deepEqual(owners.map(o => o.owner), ['Ben', 'Chris', 'Anna']);
+  assert.deepEqual(owners[0], { owner: 'Ben', netAddedArr: 80000, wonCount: 2, churnArr: -20000, openPipelineArr: 0, nextPipelineArr: 0 });
+  assert.deepEqual(owners[2], { owner: 'Anna', netAddedArr: -50000, wonCount: 0, churnArr: -50000, openPipelineArr: 70000, nextPipelineArr: 30000 });
+  assert.equal(owners[1].nextPipelineArr, 5000);
+});
+
+test('data quality: stale open opps, $0 Closed Won, missing Expected ARR, region-only accounts', () => {
+  const rows = [
+    opp('Q3-2026', '3- Proposal', 'Stale', 'Land', 'Enterprise', 10000, 1, { closeDate: '2026-09-01' }),
+    opp('Q3-2026', '3- Proposal', 'Fresh', 'Land', 'Enterprise', 10000, 1, { closeDate: '2026-10-01' }),
+    opp('Q3-2026', 'Closed Won', 'Zero', 'Expand', 'Enterprise', 0, 0),
+    opp('Q3-2026', 'Closed Won', 'Services', 'One Time', 'Enterprise', 0, 0),
+    opp('Q3-2026', 'Closed Won', 'Flat renewal', 'Renewal', 'Renewal', 0, 0),
+    opp('Q4-2026', '1- Discovery', 'NoExpected', 'Land', 'Enterprise', 40000, 1, { closeDate: '2026-12-01', expectedDeltaArrMissing: true }),
+    opp('Q2-2026', '1- Discovery', 'Old quarter', 'Land', 'Enterprise', 40000, 1, { closeDate: '2026-05-01' }),
+  ];
+  const flutter = { id: '001F', name: 'Flutter Entertainment', url: 'u', team: 'Europe', currentArr: 50000, owner: 'Sam' };
+  const issues = dataQualityIssues(rows, [flutter], ['Q3-2026', 'Q4-2026', 'Q1-2027'], '2026-09-15');
+  assert.deepEqual(issues.map(i => [i.issue, i.opp ? i.opp.account : i.account.name]), [
+    ['Open with close date in the past', 'Stale'],
+    ['Closed Won with $0 Delta ARR', 'Zero'],
+    ['Open without Expected Delta ARR', 'NoExpected'],
+    ['Account team is a region only', 'Flutter Entertainment'],
+  ]);
+  assert.equal(issues[3].detail, 'Team = Europe, no sub-team');
 });
 
 test('definitions tab covers every block of a team tab', () => {

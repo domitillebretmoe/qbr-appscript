@@ -49,9 +49,34 @@ function soqlLiteral(text) {
 }
 
 // Broad SOQL pre-filter on the token; the exact rule (teamMatches on the resolved team) is applied in JS.
+// With no team (bulk mode) the clause is a no-op and every team's rows come back.
 function teamClause(fields, team) {
+  if (!team) return 'Id != null';
   const like = soqlLiteral(`%${teamToken(team)}%`);
   return `(${fields.map(field => `${field} LIKE ${like}`).join(' OR ')})`;
+}
+
+// Bulk mode (refresh of several tabs): each object is queried once for all teams and cached for the execution, then
+// filtered per team in JS. The per-team LIKE is only a pre-filter for the same teamMatches rule, so results are identical.
+let sfBulk = null;
+
+function withBulkFetch(fn) {
+  sfBulk = {};
+  try {
+    return fn();
+  } finally {
+    sfBulk = null;
+  }
+}
+
+function bulkOrTeam(key, team, load) {
+  return sfBulk ? bulkCached(key, () => load(null)) : load(team);
+}
+
+function bulkCached(key, load) {
+  if (!sfBulk) return load();
+  if (!(key in sfBulk)) sfBulk[key] = load();
+  return sfBulk[key];
 }
 
 function ownerClause() {
@@ -72,6 +97,10 @@ function expectSalesforceUrl(url) {
 }
 
 function fetchOpportunities(team, lastFiscalYear) {
+  return bulkOrTeam(`opps:${lastFiscalYear}`, team, t => queryOpportunities(t, lastFiscalYear)).filter(o => teamMatches(o.team, team));
+}
+
+function queryOpportunities(team, lastFiscalYear) {
   const query = `
     SELECT Id, Name, StageName, IsClosed, IsWon, Type, RecordType.Name, CloseDate, FiscalYear, FiscalQuarter,
            NACV__c, Expected_NACV__c, Expected_Logo_Impact__c, Closed_Lost_Reason_List__c, Closed_Lost_Reason__c,
@@ -95,6 +124,7 @@ function fetchOpportunities(team, lastFiscalYear) {
     quarter: quarterLabel(r.FiscalQuarter, r.FiscalYear),
     deltaArr: r.NACV__c || 0,
     expectedDeltaArr: r.Expected_NACV__c || 0,
+    expectedDeltaArrMissing: r.Expected_NACV__c == null,
     expectedLogoImpact: r.Expected_Logo_Impact__c || 0,
     lostReason: r.Closed_Lost_Reason_List__c || r.Closed_Lost_Reason__c || '',
     accountId: r.AccountId,
@@ -106,12 +136,16 @@ function fetchOpportunities(team, lastFiscalYear) {
     oppTeam: r.Team__r ? r.Team__r.Name : '',
     oppGroup: r.Group__r ? r.Group__r.Name : '',
     owner: r.Owner ? r.Owner.Name : '',
-  })).filter(o => teamMatches(o.team, team));
+  }));
 }
 
 // Only accounts that can count as an active customer or an activated prospect (any open opportunity, whatever its
 // close date). SOQL does not allow a semi-join inside OR, so the two populations are fetched separately and merged.
 function fetchAccounts(team) {
+  return bulkOrTeam('accounts', team, queryAccounts).filter(a => teamMatches(a.team, team));
+}
+
+function queryAccounts(team) {
   const base = `
     SELECT Id, Name, Major_Admin_Tag__c, Current_ARR__c, Team__r.Name, Subteam__r.Name
     FROM Account
@@ -130,24 +164,56 @@ function fetchAccounts(team) {
     currentArr: r.Current_ARR__c || 0,
     hasOpenOpp: hasOpenOpp[r.Id] === true,
     team: resolveTeam(r.Team__r && r.Team__r.Name, r.Subteam__r && r.Subteam__r.Name, ''),
-  })).filter(a => teamMatches(a.team, team));
+  }));
+}
+
+// Accounts left on the region alone (Team = "Europe", no sub-team): they match no team tab, so they are surfaced
+// as a data-quality issue on every tab of that region. Only customers and accounts with open pipeline.
+function fetchRegionOnlyAccounts(team) {
+  const segments = teamSegments(team);
+  const region = isRegionSegment(segments[0]) ? segments[0] : null;
+  if (!region) return [];
+  return bulkCached(`region:${region}`, () => {
+    const base = `
+      SELECT Id, Name, Team__r.Name, Current_ARR__c, Owner.Name
+      FROM Account
+      WHERE Team__r.Name = ${soqlLiteral(region)}
+        AND Subteam__c = null
+        AND Name != 'Test'`;
+    const customers = soql(`${base} AND Current_ARR__c > 0`);
+    const prospects = soql(`${base} AND Id IN (SELECT AccountId FROM Opportunity WHERE IsClosed = false ${ownerClause()})`);
+    const seen = {};
+    return customers.concat(prospects).filter(a => !seen[a.Id] && (seen[a.Id] = true)).map(a => ({
+      id: a.Id,
+      url: recordUrl('Account', a.Id),
+      name: a.Name,
+      team: a.Team__r ? a.Team__r.Name : region,
+      currentArr: a.Current_ARR__c || 0,
+      owner: a.Owner ? a.Owner.Name : '',
+    }));
+  });
 }
 
 // Returns { 'Q3-2026': { revenue, logos }, ... } summed over every Salesforce team matching the token
 // (the "Goals By Quarter - Net ARR" report: Goal__c grouped by Team2__c and Period_Start__c).
 function fetchGoals(team) {
-  const query = `
-    SELECT Goal_Type__c, Period_Start__c, Value__c, Count_Value__c, Team2__r.Name
-    FROM Goal__c
-    WHERE ${teamClause(['Team2__r.Name'], team)}
-      AND Goal_Type__c IN ('Net ARR', 'New Logos')
-      AND Period_Start__c != null`;
+  const rows = bulkOrTeam('goals', team, queryGoals).filter(r => teamMatches(r.Team2__r && r.Team2__r.Name, team));
   const goals = {};
-  soql(query).filter(r => teamMatches(r.Team2__r && r.Team2__r.Name, team)).forEach(r => {
+  rows.forEach(r => {
     const quarter = quarterOfDate(r.Period_Start__c);
     const goal = goals[quarter] || (goals[quarter] = { revenue: 0, logos: 0 });
     if (r.Goal_Type__c === 'Net ARR') goal.revenue += r.Value__c || 0;
     if (r.Goal_Type__c === 'New Logos') goal.logos += r.Count_Value__c || 0;
   });
   return goals;
+}
+
+function queryGoals(team) {
+  const query = `
+    SELECT Goal_Type__c, Period_Start__c, Value__c, Count_Value__c, Team2__r.Name
+    FROM Goal__c
+    WHERE ${teamClause(['Team2__r.Name'], team)}
+      AND Goal_Type__c IN ('Net ARR', 'New Logos')
+      AND Period_Start__c != null`;
+  return soql(query);
 }
