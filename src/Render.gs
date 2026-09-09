@@ -347,7 +347,7 @@ function writeBlock(sheet, row, col, header, spec, values, previous, trend, shar
   const body = spec.map(([label, kind, key]) => {
     const line = [label].concat(values.map(m => cellValue(kind, m[key])));
     if (previous) line.push(qoqText(kind, values[0][key], previous[key]));
-    if (trend) line.push(trend[key] ? `=SPARKLINE(${trend[key]},{"charttype","line";"linewidth",2;"color","${COLORS.accent}"})` : '');
+    if (trend) line.push(trend[key] ? `=IFERROR(SPARKLINE(${trend[key]},{"charttype","line";"linewidth",2;"color","${COLORS.accent}"}),"")` : '');
     if (shareOf != null) line.push(kind === 'money' && shareOf ? values[0][key] / shareOf : '');
     return line.concat(Array(width - line.length).fill(''));
   });
@@ -468,14 +468,18 @@ function linkValue(cell) {
 }
 
 // Trend table at column T (header row 6, one row per quarter Q1-2026 -> selected).
-// Returns { key: A1 range of that column's values } plus quarterCount.
+// Returns { key: A1 range of that column's values } plus quarterCount. A metric with fewer than two numbers over the
+// quarters (e.g. Logo Attainment % without a logo goal) gets no range, so no sparkline is drawn for it.
 function writeTrendData(sheet, trendRows) {
   const body = trendRows.map(m => TREND_KEYS.map(key => (m[key] == null ? '' : m[key])));
+  const numbers = i => body.filter(line => typeof line[i] === 'number').length;
   sheet.getRange(5, DATA_COL).setValue('Data behind the sparklines and charts (do not edit)').setFontColor(COLORS.muted).setFontSize(8);
   sheet.getRange(6, DATA_COL, 1, TREND_KEYS.length).setValues([TREND_KEYS]).setFontWeight('bold').setFontColor(COLORS.muted).setFontSize(8);
   sheet.getRange(7, DATA_COL, body.length, TREND_KEYS.length).setValues(body).setFontColor(COLORS.muted).setFontSize(8);
   const trend = { quarterCount: body.length };
-  TREND_KEYS.forEach((key, i) => { trend[key] = sheet.getRange(7, DATA_COL + i, body.length, 1).getA1Notation(); });
+  TREND_KEYS.forEach((key, i) => {
+    if (numbers(i) >= 2) trend[key] = sheet.getRange(7, DATA_COL + i, body.length, 1).getA1Notation();
+  });
   return trend;
 }
 

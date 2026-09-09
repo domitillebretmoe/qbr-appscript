@@ -270,13 +270,19 @@ test('attainment cells get red/amber/green rules; sparklines only appear once fo
   const header = cellsWhere(sheet, c => c.value === 'Metric')[0];
   assert.equal(sheet.cell(header.row, header.col + 2).value, 'QoQ');
   assert.notEqual(sheet.cell(header.row, header.col + 3).value, 'Trend');
-  assert.ok(!Object.values(sheet.cells).some(c => typeof c.formula === 'string' && c.formula.startsWith('=SPARKLINE')), 'no sparklines');
+  assert.ok(!Object.values(sheet.cells).some(c => typeof c.value === 'string' && c.value.includes('SPARKLINE')), 'no sparklines');
 
   const long = sampleView('Q3-2026');
   long.trend = [Object.assign({}, long.trend[0], { quarter: 'Q4-2025' })].concat(long.trend);
+  long.trend.forEach(t => { t.logoAttainmentPct = null; });
   const sheet4 = render(long);
   const header4 = cellsWhere(sheet4, c => c.value === 'Metric')[0];
   assert.equal(sheet4.cell(header4.row, header4.col + 3).value, 'Trend');
+  // Sparklines never surface #N/A: the formula is wrapped in IFERROR and a metric without at least two numbers
+  // (Logo Attainment % without a logo goal) gets no sparkline at all.
+  const trendCell = label => sheet4.cell(cellsWhere(sheet4, c => c.value === label && c.col === 2)[0].row, 5);
+  assert.match(trendCell('Net Added ARR').value, /^=IFERROR\(SPARKLINE\(/);
+  assert.equal(trendCell('Logo Attainment (%)').value, '');
 });
 
 test('Europe roll-up banner names its members', () => {
