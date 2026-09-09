@@ -285,6 +285,16 @@ test('attainment cells get red/amber/green rules; sparklines only appear once fo
   assert.equal(trendCell('Logo Attainment (%)').value, '');
 });
 
+test('long owner / data-quality tables grow the grid instead of aborting', () => {
+  const view = sampleView('Q3-2026');
+  const issue = view.dataQuality[0] || { issue: 'Open with close date in the past', detail: 'x', opp: view.current.topDeals[0] || { account: 'A', url: '', accountUrl: '' } };
+  view.dataQuality = Array.from({ length: 700 }, () => issue);
+  const sheet = render(view);
+  assert.ok(sheet.getMaxRows() >= 700, `grid grew to ${sheet.getMaxRows()} rows`);
+  assert.equal(sheet.charts.length, 6);
+  assert.ok(sheet.charts.every(c => c.position.row <= sheet.getMaxRows()), 'charts placed inside the grid');
+});
+
 test('Europe roll-up banner names its members', () => {
   const view = Object.assign(sampleView('Q3-2026'), { team: 'Europe', members: ['Europe - Nordics', 'Europe - Benelux', 'Europe - UKI', 'Europe - DACH', 'Europe - South'] });
   const sheet = render(view);

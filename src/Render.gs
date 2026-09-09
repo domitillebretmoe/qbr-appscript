@@ -431,6 +431,7 @@ const oppRow = (o, middle) => [link(o.account, o.accountUrl), link(o.url ? 'Link
 // item (or a single "-" row). Link cells become Salesforce hyperlinks. Returns the row after the tallest table.
 function writeTables(sheet, row, tables) {
   const height = Math.max(1, ...tables.map(t => t.rows.length));
+  ensureRows(sheet, row + 2 + height);
   tables.forEach(({ title, col, columns, rows }) => {
     sheet.getRange(row, col, 1, TABLE_WIDTH).merge().setValue(title).setFontWeight('bold').setFontColor(COLORS.ink).setFontSize(9)
       .setBackground(COLORS.card).setVerticalAlignment('middle')
@@ -459,6 +460,15 @@ function writeTables(sheet, row, tables) {
     sheet.getRange(row, col, height + 2, TABLE_WIDTH).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
   });
   return row + 2 + height;
+}
+
+// Grows the grid when the dashboard runs past the PAGE_ROWS pre-sized in resetSheet (long owner / data-quality tables),
+// styling the new rows like the rest of the page.
+function ensureRows(sheet, lastRow) {
+  const have = sheet.getMaxRows();
+  if (lastRow <= have) return;
+  sheet.insertRowsAfter(have, lastRow - have);
+  sheet.getRange(have + 1, 1, lastRow - have, LAST_COL + 1).setBackground(COLORS.page).setFontFamily(FONT).setFontSize(10).setFontColor(COLORS.label);
 }
 
 function linkValue(cell) {
@@ -551,6 +561,7 @@ function writeCharts(sheet, row, view, trend) {
     builder.setPosition(r, c, 0, 0).setOption('width', 600).setOption('height', 300).build()
   );
   const rowsPerChart = 15;
+  ensureRows(sheet, row + 3 * rowsPerChart);
 
   place(chart(Charts.ChartType.COLUMN, `ARR bridge ${view.quarter}`, 3, { 0: { dataLabel: 'none', visibleInLegend: false } }).addRange(waterfall)
     .setOption('isStacked', true)
