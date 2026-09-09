@@ -27,6 +27,10 @@ function quarterMetrics(opps, quarter, goal) {
   const fullChurnArr = sum(fullChurn, 'deltaArr');
   const churnArr = downgradeArr + fullChurnArr;
   const logoAttainment = sum(rows.filter(o => o.major), 'expectedLogoImpact');
+  const newLogoArr = sum(won.filter(o => o.type === 'Land'), 'deltaArr');
+  const open = rows.filter(o => !o.isClosed);
+  const openPipelineArr = sum(open, 'deltaArr');
+  const remainingGoal = Math.max(0, (goal.revenue || 0) - netAddedArr);
 
   return {
     quarter,
@@ -42,6 +46,12 @@ function quarterMetrics(opps, quarter, goal) {
     fullChurnArr,
     fullChurnCount: fullChurn.length,
     churnArr,
+    newLogoArr,
+    // Growth from existing customers: everything won that is not a new logo, net of downgrades.
+    expansionArr: netAddedArr - churnArr - newLogoArr,
+    openPipelineArr,
+    remainingGoal,
+    pipelineCoverage: remainingGoal ? openPipelineArr / remainingGoal : null,
     churnCustomers: fullChurn.length,
     renewals: wonRenewals.length + fullChurn.length,
     wonRenewals: wonRenewals.length,
@@ -67,8 +77,13 @@ function quarterMetrics(opps, quarter, goal) {
 
 // Forward-looking quarter. Net Forecast = Expected Delta ARR of Land + Expand + renewals expected to grow,
 // plus forecast churn (renewals expected to shrink). Renewal = record type, as for actuals.
-function forecastMetrics(opps, quarter, startingArr, goal) {
+// `accounts` supplies the Current ARR that open renewals put up for renewal.
+function forecastMetrics(opps, quarter, startingArr, goal, accounts) {
   const rows = inQuarter(opps, quarter);
+  const arrOf = {};
+  (accounts || []).forEach(a => { arrOf[a.id] = a.currentArr; });
+  const renewalsDue = rows.filter(o => isRenewal(o) && !o.isClosed).map(o => Object.assign({}, o, { accountArr: arrOf[o.accountId] || 0 }));
+  const renewalArrDue = unique(renewalsDue.map(o => o.accountId)).reduce((total, id) => total + (arrOf[id] || 0), 0);
   const landExpand = rows.filter(o => (o.type === 'Land' || o.type === 'Expand') && !isRenewal(o));
   const renewalUp = rows.filter(o => isRenewal(o) && o.expectedDeltaArr > 0);
   const churn = rows.filter(o => isRenewal(o) && o.expectedDeltaArr < 0);
@@ -87,6 +102,9 @@ function forecastMetrics(opps, quarter, startingArr, goal) {
     logoForecast: sum(rows.filter(o => o.major), 'expectedLogoImpact'),
     pipelineArr,
     pipelineCoverage: ratio(pipelineArr, goal.revenue),
+    renewalsDueCount: renewalsDue.length,
+    renewalArrDue,
+    renewalsDue: byField(renewalsDue, 'accountArr', true),
     startingArr,
     forecastArr,
     forecastChurnArr,
@@ -120,9 +138,93 @@ function partnerMetrics(opps, quarter) {
   return { partnerNetAddedArr: m.netAddedArr, partnerNewLogos: m.newLogos, partnerChurnArr: m.churnArr, partnerChurnCustomers: m.churnCustomers };
 }
 
-// Starting/Ending ARR come from the ARR Ledger (seeded quarters keep last workbook's values).
+// Starting/Ending ARR come from the ARR Ledger (seeded quarters keep last workbook's values). Dollar retention:
+// GRR = (Starting ARR + downgrades + full churn) / Starting ARR, NRR = GRR + expansion from existing customers.
 function withArr(metrics, ledgerEntry) {
-  return Object.assign(metrics, { startingArr: ledgerEntry.startingArr, endingArr: ledgerEntry.endingArr });
+  const { startingArr, endingArr } = ledgerEntry;
+  return Object.assign(metrics, {
+    startingArr,
+    endingArr,
+    grr: ratio(startingArr + metrics.churnArr, startingArr),
+    nrr: ratio(startingArr + metrics.churnArr + metrics.expansionArr, startingArr),
+  });
+}
+
+// Linearity: how far through the quarter we are vs how far through the goal. Past quarters are fully elapsed.
+function withPace(metrics, today) {
+  const quarterElapsedPct = quarterElapsed(metrics.quarter, today);
+  return Object.assign(metrics, {
+    quarterElapsedPct,
+    pace: metrics.attainment == null ? null : ratio(metrics.attainment, quarterElapsedPct),
+  });
+}
+
+// One row per opportunity owner for the selected quarter, best Net Added ARR first.
+function ownerMetrics(opps, quarter, nextQuarter) {
+  const rows = inQuarter(opps, quarter);
+  const next = inQuarter(opps, nextQuarter).filter(o => !o.isClosed);
+  const owners = unique(rows.concat(next).map(o => o.owner));
+  return owners.map(owner => {
+    const mine = rows.filter(o => o.owner === owner);
+    const won = mine.filter(isWon);
+    const fullChurn = mine.filter(o => isLost(o) && isRenewal(o));
+    const downgrades = won.filter(o => isRenewal(o) && o.deltaArr < 0);
+    return {
+      owner,
+      netAddedArr: sum(won, 'deltaArr') + sum(fullChurn, 'deltaArr'),
+      wonCount: won.length,
+      churnArr: sum(downgrades, 'deltaArr') + sum(fullChurn, 'deltaArr'),
+      openPipelineArr: sum(mine.filter(o => !o.isClosed), 'deltaArr'),
+      nextPipelineArr: sum(next.filter(o => o.owner === owner), 'deltaArr'),
+    };
+  }).sort((a, b) => b.netAddedArr - a.netAddedArr);
+}
+
+// Salesforce hygiene checks over the selected quarter and the two after it. Each issue: { issue, detail, opp | account }.
+const DATA_QUALITY_CHECKS = {
+  staleOpen: 'Open with close date in the past',
+  wonZero: 'Closed Won with $0 Delta ARR',
+  noExpected: 'Open without Expected Delta ARR',
+  regionOnly: 'Account team is a region only',
+};
+
+function dataQualityIssues(opps, unassignedAccounts, quarters, today) {
+  const rows = opps.filter(o => quarters.indexOf(o.quarter) >= 0);
+  const issues = [];
+  rows.filter(o => !o.isClosed && o.closeDate && o.closeDate < today)
+    .forEach(o => issues.push({ issue: DATA_QUALITY_CHECKS.staleOpen, detail: o.stage, opp: o }));
+  rows.filter(o => isWon(o) && !isRenewal(o) && o.type !== 'One Time' && o.deltaArr === 0)
+    .forEach(o => issues.push({ issue: DATA_QUALITY_CHECKS.wonZero, detail: o.type || '', opp: o }));
+  rows.filter(o => !o.isClosed && o.expectedDeltaArrMissing)
+    .forEach(o => issues.push({ issue: DATA_QUALITY_CHECKS.noExpected, detail: `Delta ARR ${formatMoney(o.deltaArr)}`, opp: o }));
+  (unassignedAccounts || []).forEach(a => issues.push({ issue: DATA_QUALITY_CHECKS.regionOnly, detail: `Team = ${a.team}, no sub-team`, account: a }));
+  return issues;
+}
+
+// Everything a team tab shows, from already-fetched rows: `ledgers` holds one { quarter: { startingArr, endingArr } }
+// map per member team (a roll-up sums them), `today` is yyyy-mm-dd.
+function composeView({ team, members, quarter, opps, accounts, goals, ledgers, unassignedAccounts, today }) {
+  const goalFor = q => goals[q] || { revenue: 0, logos: 0 };
+  const next1 = shiftQuarter(quarter, 1);
+  const next2 = shiftQuarter(quarter, 2);
+  const quarters = quartersBetween(FIRST_QUARTER, quarter);
+  const ledger = {};
+  quarters.forEach(q => {
+    ledger[q] = {
+      startingArr: ledgers.reduce((total, l) => total + l[q].startingArr, 0),
+      endingArr: ledgers.reduce((total, l) => total + l[q].endingArr, 0),
+    };
+  });
+  const trend = quarters.map(q => withPace(withArr(
+    Object.assign(quarterMetrics(opps, q, goalFor(q)), accountMetrics(accounts, opps, q), partnerMetrics(opps, q)), ledger[q]), today));
+  const current = trend[trend.length - 1];
+  const future1 = forecastMetrics(opps, next1, current.endingArr, goalFor(next1), accounts);
+  const future2 = forecastMetrics(opps, next2, future1.forecastEndingArr, goalFor(next2), accounts);
+  return {
+    team, members, quarter, trend, current, future: [future1, future2], opps, today,
+    owners: ownerMetrics(opps, quarter, next1),
+    dataQuality: dataQualityIssues(opps, unassignedAccounts, [quarter, next1, next2], today),
+  };
 }
 
 function formatMoney(value) {

@@ -113,6 +113,22 @@ function quarterOfDate(isoDate) {
   return quarterLabel(Math.floor((month - 2) / 3) + 1, year);
 }
 
+// First day of the quarter as yyyy-mm-dd (Q1 = 1 Feb of the fiscal year, Q4 = 1 Nov).
+function quarterStart(label) {
+  const { q, fy } = parseQuarter(label);
+  const month = 2 + (q - 1) * 3;
+  return `${fy}-${String(month).padStart(2, '0')}-01`;
+}
+
+// Share of the quarter's days already elapsed on `today` (yyyy-mm-dd): 0 before it starts, 1 once it is over.
+function quarterElapsed(label, today) {
+  const day = iso => Date.UTC(...iso.split('-').map((n, i) => Number(n) - (i === 1 ? 1 : 0)));
+  const start = day(quarterStart(label));
+  const end = day(quarterStart(shiftQuarter(label, 1)));
+  const now = day(today);
+  return Math.min(1, Math.max(0, (now - start) / (end - start)));
+}
+
 function quartersBetween(first, last) {
   const out = [];
   for (let q = first; ; q = shiftQuarter(q, 1)) {

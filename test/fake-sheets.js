@@ -26,9 +26,13 @@ class FakeSheet {
     this.tabColor = null;
     this.maxRows = 1000;
     this.maxColumns = 26;
+    this.sheetId = 123456;
+    this.parent = { getId: () => 'SPREADSHEET_ID' };
   }
   cell(r, c) { return this.cells[`${r},${c}`] || (this.cells[`${r},${c}`] = { row: r, col: c }); }
   getName() { return this.name; }
+  getSheetId() { return this.sheetId; }
+  getParent() { return this.parent; }
   getMaxRows() { return this.maxRows; }
   getMaxColumns() { return this.maxColumns; }
   insertRowsAfter(after, n) { this.maxRows += n; return this; }
@@ -82,6 +86,7 @@ class FakeRange {
   setRichTextValue(rt) { return this.each(cell => { cell.value = rt.text; cell.richText = rt.runs; cell.link = rt.link; }); }
   setRichTextValues(values) { return this.each((cell, r, c) => { cell.value = values[r][c].text; cell.richText = values[r][c].runs; cell.link = values[r][c].link; }); }
   setNumberFormat(f) { return this.style('numberFormat', f); }
+  setNote(v) { return this.style('note', v); }
   setBackground(v) { return this.style('background', v); }
   setFontColor(v) { return this.style('fontColor', v); }
   setFontColors(m) { return this.each((cell, r, c) => { cell.fontColor = m[r][c]; }); }
