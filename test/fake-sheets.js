@@ -118,6 +118,11 @@ const builder = (state = {}) => new Proxy({}, {
     if (k === 'setRanges') return ranges => builder(Object.assign(state, { ranges: ranges.map(r => r.getA1Notation()) }));
     if (k === 'setGradientMinpointWithValue') return (color, type, value) => builder(Object.assign(state, { min: { color, value } }));
     if (k === 'setGradientMaxpointWithValue') return (color, type, value) => builder(Object.assign(state, { max: { color, value } }));
+    if (k === 'whenNumberGreaterThanOrEqualTo') return v => builder(Object.assign(state, { when: { gte: v } }));
+    if (k === 'whenNumberLessThan') return v => builder(Object.assign(state, { when: { lt: v } }));
+    if (k === 'whenNumberBetween') return (a, b) => builder(Object.assign(state, { when: { between: [a, b] } }));
+    if (k === 'setBackground') return v => builder(Object.assign(state, { background: v }));
+    if (k === 'setFontColor') return v => builder(Object.assign(state, { fontColor: v }));
     return () => builder(state);
   },
 });

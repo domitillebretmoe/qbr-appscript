@@ -106,9 +106,10 @@ test('linked tables: churn vs lost pipeline, renewals, top customers, top deals,
   assert.equal(logos.rows[0][0].link, accountUrl('Zalando'));
   assert.match(logos.rows[0][0].link, /^https:\/\/codeium\.lightning\.force\.com\/lightning\/r\/Account\/001[A-Za-z0-9]{15}\/view$/);
   assert.match(logos.rows[0][1].link, /\/lightning\/r\/Opportunity\/006\d{15}\/view$/);
+  assert.equal(logos.rows[0][1].value, 'Link', 'opportunity column is a short "Link" cell');
   assert.equal(logos.rows[0][3].value, '2025-08-20');
   assert.equal(logos.rows[0][4].value, 96000);
-  assert.equal(logos.rows[0][4].numberFormat, '$#,##0;-$#,##0');
+  assert.equal(logos.rows[0][4].numberFormat, '$#,##0;[Red]($#,##0)');
 
   // Lost pipeline (Closed Lost non-renewal) is not churn (Closed Lost renewal).
   const lost = tableRows(sheet, 'Lost Pipeline');
@@ -145,7 +146,7 @@ test('linked tables: churn vs lost pipeline, renewals, top customers, top deals,
   const q1 = tableRows(sheet, 'Top 10 Deals Q+1 Q4-2026');
   assert.deepEqual(q1.headers, ['Account', 'Opportunity', 'Stage', 'Close date', 'Delta ARR', 'Owner']);
   assert.deepEqual(q1.rows.map(r => [r[0].value, r[4].value, r[3].value]), [['BMW Group', 540000, '2026-01-20'], ['DKB', 120000, '2025-11-30'], ['CompuGroup', 0, '2025-12-15']]);
-  assert.ok(q1.rows.every(r => r[1].link.indexOf('/lightning/r/Opportunity/') > 0));
+  assert.ok(q1.rows.every(r => r[1].link.indexOf('/lightning/r/Opportunity/') > 0 && r[1].value === 'Link'));
   const q2 = tableRows(sheet, 'Top 10 Deals Q+2 Q1-2027');
   assert.deepEqual(q2.rows.map(r => r[0].value), ['Roche', 'Zalando']);
 
@@ -158,8 +159,10 @@ test('linked tables: churn vs lost pipeline, renewals, top customers, top deals,
 test('every chart reads one contiguous block whose header row and data rows are populated', () => {
   const sheet = render(sampleView('Q3-2026'));
   const titles = sheet.charts.map(c => c.options.title);
-  assert.deepEqual(titles, ['ARR bridge Q3-2026', 'Attainment vs goal Q3-2026', 'Renewals Q3-2026: won vs lost', 'Q+1 / Q+2 forecast vs goal',
+  assert.deepEqual(titles, ['ARR bridge Q3-2026', 'Attainment vs goal Q3-2026', 'Renewals Q3-2026: 2 won / 1 lost (-$84K churned)', 'Q+1 / Q+2 forecast vs goal',
     'Net Added ARR vs goal by quarter', 'Ending ARR by quarter']);
+  // Bars everywhere except the renewals donut: no line charts with 2-3 points.
+  assert.deepEqual(sheet.charts.map(c => c.type), ['COLUMN', 'BAR', 'PIE', 'COLUMN', 'COLUMN', 'COLUMN']);
   sheet.charts.forEach(chart => {
     assert.equal(chart.ranges.length, 1, `${chart.options.title}: single range`);
     const { a1, values } = chart.ranges[0];
@@ -171,15 +174,53 @@ test('every chart reads one contiguous block whose header row and data rows are 
       row.slice(1).forEach(v => assert.equal(typeof v, 'number', `${chart.options.title}: numeric series in ${a1}`));
     });
     // Only the embedded-chart option subset.
-    Object.keys(chart.options).forEach(k => assert.ok(['title', 'legend', 'colors', 'isStacked', 'vAxis', 'hAxis', 'pieHole', 'pointSize',
+    Object.keys(chart.options).forEach(k => assert.ok(['title', 'legend', 'colors', 'isStacked', 'vAxis', 'hAxis', 'pieHole', 'pieSliceText', 'series',
       'useFirstColumnAsDomain', 'width', 'height'].includes(k), `${chart.options.title}: option ${k}`));
+    // Every plotted series shows its values; the source cells carry the $M / % format the labels inherit.
+    if (chart.type === 'PIE') {
+      assert.equal(chart.options.pieSliceText, 'value');
+    } else {
+      const plotted = Object.keys(chart.options.series).filter(i => chart.options.series[i].dataLabel === 'value');
+      assert.equal(plotted.length, values[0].length - 1 - (chart.options.isStacked ? 1 : 0), `${chart.options.title}: labelled series`);
+    }
+    const [, colLetters, topRow] = a1.match(/^([A-Z]+)(\d+):/);
+    const col = colLetters.split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+    const sample = sheet.cell(Number(topRow) + 1, col + 1);
+    assert.ok(/M"|%|^0$/.test(sample.numberFormat), `${chart.options.title}: chart number format ${sample.numberFormat}`);
   });
+  const bridge = sheet.charts[0];
+  assert.deepEqual(bridge.options.series[0], { dataLabel: 'none', visibleInLegend: false }, 'bridge base series hidden from legend, no label');
+  assert.deepEqual(bridge.options.vAxis, { viewWindow: { min: 0 } });
+  assert.deepEqual(sheet.charts[1].options.hAxis, { viewWindow: { min: 0, max: 1 } }, 'attainment axis at least 0-100%');
   const trendChart = sheet.charts[4];
   assert.deepEqual(trendChart.ranges[0].values[0], ['Quarter', 'Goal', 'Net Added ARR', 'Churn ARR']);
   assert.deepEqual(trendChart.ranges[0].values.slice(1).map(r => r[0]), ['Q1-2026', 'Q2-2026', 'Q3-2026']);
   const arr = sheet.charts[5].ranges[0].values;
   assert.equal(sheet.cell(5, 7).value, 'ENDING ARR');
   assert.equal(arr[arr.length - 1][1], sheet.cell(6, 7).value, 'Ending ARR chart ends on the KPI card value');
+});
+
+test('attainment cells get red/amber/green rules; sparklines only appear once four quarters exist', () => {
+  const sheet = render(sampleView('Q3-2026'));
+  const rag = sheet.rules.filter(r => r.when);
+  // KPI card (font) + Attainment (%) + Logo Attainment (%) + Net Forecast (%) = 4 ranges x 3 thresholds.
+  assert.equal(rag.length, 12);
+  assert.deepEqual(rag.slice(0, 3).map(r => r.when), [{ gte: 1 }, { between: [0.7, 0.9999] }, { lt: 0.7 }]);
+  assert.ok(rag.slice(0, 3).every(r => r.fontColor && !r.background), 'card value coloured by font');
+  assert.ok(rag.slice(3).every(r => r.background && !r.fontColor), 'table cells coloured by background');
+  assert.equal(sheet.cell(5, 5).value, 'ATTAINMENT');
+  assert.ok(rag[0].ranges.includes('E6:F6'), `rules cover the Attainment card, got ${rag[0].ranges}`);
+  // Three quarters: no Trend column (sparklines are noise), so the PREVIOUS QUARTER table is 3 wide.
+  const header = cellsWhere(sheet, c => c.value === 'Metric')[0];
+  assert.equal(sheet.cell(header.row, header.col + 2).value, 'QoQ');
+  assert.notEqual(sheet.cell(header.row, header.col + 3).value, 'Trend');
+  assert.ok(!Object.values(sheet.cells).some(c => typeof c.formula === 'string' && c.formula.startsWith('=SPARKLINE')), 'no sparklines');
+
+  const long = sampleView('Q3-2026');
+  long.trend = [Object.assign({}, long.trend[0], { quarter: 'Q4-2025' })].concat(long.trend);
+  const sheet4 = render(long);
+  const header4 = cellsWhere(sheet4, c => c.value === 'Metric')[0];
+  assert.equal(sheet4.cell(header4.row, header4.col + 3).value, 'Trend');
 });
 
 test('Europe roll-up banner names its members', () => {

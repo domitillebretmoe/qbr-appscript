@@ -19,7 +19,7 @@ function definitionRows() {
 
     ['Quarter actuals', 'Revenue Goal', 'Sum of Goal Value of "Net ARR" goals whose Period Start falls in the quarter, over every Salesforce team matching B1.', 'Goal__c: Goal_Type__c = "Net ARR", Value__c, Period_Start__c, Team2__c'],
     ['Quarter actuals', 'Net Added ARR', 'Sum of Delta ARR of Closed Won opportunities + Sum of Delta ARR of Closed Lost renewals.', 'Opportunity.NACV__c, StageName'],
-    ['Quarter actuals', 'Attainment (%)', 'Net Added ARR / Revenue Goal.', '-'],
+    ['Quarter actuals', 'Attainment (%)', 'Net Added ARR / Revenue Goal. Attainment-style percentages are coloured green >= 100%, amber 70-99%, red < 70%.', '-'],
     ['Quarter actuals', 'Logo Goal', 'Sum of Count Value of "New Logos" goals whose Period Start falls in the quarter.', 'Goal__c: Goal_Type__c = "New Logos", Count_Value__c'],
     ['Quarter actuals', 'Logo attainment', 'Sum of Expected Logo Impact of the quarter\'s opportunities on Major accounts (a churned logo counts -1).', 'Opportunity.Expected_Logo_Impact__c, Account.Major_Admin_Tag__c'],
     ['Quarter actuals', 'New logos', 'Number of Closed Won opportunities of Type "Land".', 'Opportunity.Type'],
@@ -31,7 +31,7 @@ function definitionRows() {
     ['Quarter actuals', 'Starting ARR', 'Previous quarter\'s Ending ARR from the ARR Ledger. Q1-2026 = Q4-2025 Ending ARR from the FY27 QBR Cockpit workbook.', 'ARR Ledger tab'],
     ['Quarter actuals', 'Ending ARR', 'Starting ARR + Net Added ARR. Q1-2026 and Q2-2026 keep the workbook values (Source != "Salesforce ..." in the ledger); later quarters are recomputed on refresh.', 'ARR Ledger tab'],
     ['Quarter actuals', 'QoQ', 'Metric this quarter - same metric the previous quarter.', '-'],
-    ['Quarter actuals', 'Trend', `Same metric for every quarter from ${FIRST_QUARTER} to the selected quarter.`, '-'],
+    ['Quarter actuals', 'Trend', `Same metric for every quarter from ${FIRST_QUARTER} to the selected quarter; the sparkline column appears once at least four quarters exist.`, '-'],
     ['Quarter actuals', '# Renewals / # Won renewals', 'Closed renewals (won + lost) / Closed Won renewals.', 'Opportunity.RecordType, StageName'],
     ['Quarter actuals', 'Renewal rate (%)', 'Won renewals / (won renewals + lost renewals).', '-'],
     ['Quarter actuals', 'Top churns', 'Three downgrades / full churns with the most negative Delta ARR.', 'Opportunity.NACV__c'],
