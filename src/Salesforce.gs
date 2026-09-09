@@ -58,6 +58,11 @@ function ownerClause() {
   return EXCLUDED_OWNERS.length ? `AND Owner.Name NOT IN (${EXCLUDED_OWNERS.map(soqlLiteral).join(', ')})` : '';
 }
 
+// Lightning record link shown next to every account / opportunity name on the tabs.
+function recordUrl(objectType, id) {
+  return id ? `${sfConnect().instanceUrl}/lightning/r/${objectType}/${id}/view` : '';
+}
+
 function expectSalesforceUrl(url) {
   const match = /^https:\/\/([a-z0-9.-]+)\/?$/i.exec(String(url).trim());
   if (!match || !/\.(my\.salesforce\.com|salesforce\.com|force\.com)$/i.test(match[1])) {
@@ -79,6 +84,7 @@ function fetchOpportunities(team, lastFiscalYear) {
       AND FiscalYear >= ${parseQuarter(FIRST_QUARTER).fy} AND FiscalYear <= ${lastFiscalYear}`;
   return soql(query).map(r => ({
     id: r.Id,
+    url: recordUrl('Opportunity', r.Id),
     name: r.Name,
     stage: r.StageName,
     isClosed: r.IsClosed,
@@ -92,6 +98,7 @@ function fetchOpportunities(team, lastFiscalYear) {
     expectedLogoImpact: r.Expected_Logo_Impact__c || 0,
     lostReason: r.Closed_Lost_Reason_List__c || r.Closed_Lost_Reason__c || '',
     accountId: r.AccountId,
+    accountUrl: recordUrl('Account', r.AccountId),
     account: r.Account.Name,
     accountTeam: r.Account.Team__r ? r.Account.Team__r.Name : '',
     team: resolveTeam(r.Account.Team__r && r.Account.Team__r.Name, r.Account.Subteam__r && r.Account.Subteam__r.Name, r.Team__r && r.Team__r.Name),
@@ -117,6 +124,7 @@ function fetchAccounts(team) {
   const seen = {};
   return customers.concat(prospects).filter(r => !seen[r.Id] && (seen[r.Id] = true)).map(r => ({
     id: r.Id,
+    url: recordUrl('Account', r.Id),
     name: r.Name,
     major: r.Major_Admin_Tag__c === true,
     currentArr: r.Current_ARR__c || 0,

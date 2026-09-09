@@ -79,6 +79,9 @@ def write_sheet(ws, data):
             horizontal=cell.get('hAlign'), vertical={'middle': 'center'}.get(cell.get('vAlign'), cell.get('vAlign')),
             wrap_text=bool(cell.get('wrap')),
         )
+        if cell.get('link'):
+            c.hyperlink = cell['link']
+            c.font = Font(name=font_name, size=cell.get('fontSize', 10), color='2200FF', underline='single')
         if cell.get('richText'):
             text = str(value)
             c.value = CellRichText(*[

@@ -2,7 +2,10 @@
 // FUTURE QUARTER(S) / PARTNER CONTRIBUTION tables, charts, and the trend data area from column T.
 const DATA_COL = 20;
 const LAST_COL = 14; // N
-const FORMATS = { money: '$#,##0;-$#,##0', pct: '0.0%', int: '0', text: '@' };
+const PAGE_ROWS = 600;
+const FORMATS = { money: '$#,##0;-$#,##0', pct: '0.0%', int: '0', text: '@', date: 'yyyy-mm-dd' };
+const TABLE_WIDTH = 6;
+const NUMERIC_KINDS = ['money', 'pct', 'int'];
 // Cognition palette: warm off-white page, near-black ink, electric-blue accent, flat white cards.
 const FONT = 'Inter';
 const COLORS = {
@@ -78,6 +81,12 @@ const PARTNER_ROWS = [
   ['Churn - ARR $', 'money', 'partnerChurnArr'],
   ['Churn - Customer #', 'int', 'partnerChurnCustomers'],
 ];
+// Linked tables: [header, kind]; kind "link" cells are { text, url }.
+const OPP_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Type', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
+const RENEWAL_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Record type', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
+const DEAL_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Stage', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
+const CUSTOMER_COLUMNS = [['#', 'int'], ['Account', 'link'], ['Team', 'text'], ['Current ARR', 'money'], ['% of active ARR', 'pct'], ['Open opp', 'text']];
+
 // Metrics kept per quarter in the data area (drives sparklines and the trend chart).
 const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logoAttainmentPct', 'endingArr',
   'renewals', 'wonRenewals', 'renewalRate', 'churnArr', 'churnCustomers', 'activeCustomers', 'conversionRate', 'lostPipelineCount',
@@ -88,7 +97,8 @@ function renderTeamTab(sheet, view) {
   const trend = writeTrendData(sheet, view.trend);
   const previous = view.trend.length > 1 ? view.trend[view.trend.length - 2] : null;
 
-  writeBanner(sheet, 3, view.team, `${view.quarter} QBR`);
+  const members = view.members && view.members.length > 1 ? `   (roll-up of ${view.members.map(teamToken).join(', ')})` : '';
+  writeBanner(sheet, 3, view.team, `${view.quarter} QBR${members}`);
   let row = writeKpiCards(sheet, 5, view.current, previous) + 1;
 
   row = writeSection(sheet, row, 'PREVIOUS QUARTER', `${view.quarter} actuals vs goal, QoQ vs ${previous ? previous.quarter : 'n/a'}, trend from ${FIRST_QUARTER}`);
@@ -97,7 +107,28 @@ function renderTeamTab(sheet, view) {
     writeBlock(sheet, row, 7, ['ARR bridge', view.quarter, '% of Starting'], ARR_ROWS, [view.current], null, null, view.current.startingArr),
     writeBlock(sheet, row, 11, ['Accounts', view.quarter, 'QoQ', 'Trend'], ACCOUNT_ROWS, [view.current], previous, trend),
   ) + 1;
-  row = writeLists(sheet, row, [['Logos Won', view.current.logosWon, 2], ['Logos Lost', view.current.logosLost, 7]]) + 1;
+  const lists = view.current.lists;
+  const oppTable = (title, col, columns, opps, middle) => ({ title: `${title} (${opps.length})`, col, columns, rows: opps.map(o => oppRow(o, middle)) });
+  row = writeTables(sheet, row, [
+    oppTable('Logos Won', 2, OPP_COLUMNS, lists.logosWon, o => o.type),
+    oppTable('Lost Pipeline', 9, OPP_COLUMNS, lists.lostPipeline, o => o.type),
+  ]) + 1;
+  row = writeTables(sheet, row, [
+    oppTable('Churned Customers', 2, RENEWAL_COLUMNS, lists.churned, o => o.recordType),
+    oppTable('Downgrade Customers', 9, RENEWAL_COLUMNS, lists.downgrades, o => o.recordType),
+  ]) + 1;
+  row = writeTables(sheet, row, [
+    oppTable('Renewals Won', 2, RENEWAL_COLUMNS, lists.renewalsWon, o => o.recordType),
+    oppTable('Renewals Lost', 9, RENEWAL_COLUMNS, lists.renewalsLost, o => o.recordType),
+  ]) + 1;
+  const customers = (title, col, accounts, total) => ({
+    title: `${title} (${accounts.length} of ${total} active)`, col, columns: CUSTOMER_COLUMNS,
+    rows: accounts.map((a, i) => [i + 1, link(a.name, a.url), a.team, a.currentArr, view.current.activeArr ? a.currentArr / view.current.activeArr : '', a.hasOpenOpp ? 'Yes' : 'No']),
+  });
+  row = writeTables(sheet, row, [
+    customers('Top 10 Major Customers', 2, view.current.topMajors, view.current.majorCustomers),
+    customers('Top 10 Enterprise Customers', 9, view.current.topEnterprise, view.current.enterpriseCustomers),
+  ]) + 1;
 
   const [q1, q2] = view.future;
   row = writeSection(sheet, row, 'FUTURE QUARTER(S)', `Forecast for ${q1.quarter} and ${q2.quarter}, pipeline = open opportunities only`);
@@ -105,6 +136,10 @@ function renderTeamTab(sheet, view) {
     writeBlock(sheet, row, 2, ['Metric', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ROWS, [q1, q2], null, null),
     writeBlock(sheet, row, 7, ['ARR forecast', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ARR_ROWS, [q1, q2], null, null),
   ) + 1;
+  row = writeTables(sheet, row, [
+    oppTable(`Top 10 Deals Q+1 ${q1.quarter}`, 2, DEAL_COLUMNS, q1.topDeals, o => o.stage),
+    oppTable(`Top 10 Deals Q+2 ${q2.quarter}`, 9, DEAL_COLUMNS, q2.topDeals, o => o.stage),
+  ]) + 1;
 
   row = writeSection(sheet, row, 'PARTNER CONTRIBUTION', `Opportunities in the ${PARTNER_GROUP} group for this team`);
   row = writeBlock(sheet, row, 2, ['Metric', view.quarter, 'QoQ', 'Trend'], PARTNER_ROWS, [view.current], previous, trend) + 1;
@@ -118,13 +153,18 @@ function resetSheet(sheet, team, quarter) {
   sheet.clear();
   sheet.clearConditionalFormatRules();
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart();
+  // A new sheet has 26 columns; the data area behind the charts runs to column DATA_COL + TREND_KEYS.length.
+  const neededCols = DATA_COL + TREND_KEYS.length;
+  if (sheet.getMaxColumns() < neededCols) sheet.insertColumnsAfter(sheet.getMaxColumns(), neededCols - sheet.getMaxColumns());
+  if (sheet.getMaxRows() < PAGE_ROWS) sheet.insertRowsAfter(sheet.getMaxRows(), PAGE_ROWS - sheet.getMaxRows());
   sheet.setHiddenGridlines(true);
   sheet.setTabColor(COLORS.accent);
   sheet.setColumnWidth(1, 24);
   sheet.setColumnWidths(2, LAST_COL - 1, 105);
-  [2, 7, 11].forEach(c => sheet.setColumnWidth(c, 170)); // metric label columns
+  [2, 9].forEach(c => sheet.setColumnWidth(c, 170)); // first column of the left / right tables
+  [7, 11].forEach(c => sheet.setColumnWidth(c, 150)); // metric label columns
   sheet.setColumnWidth(LAST_COL + 1, 40);
-  sheet.getRange(1, 1, 400, LAST_COL + 1).setBackground(COLORS.page).setFontFamily(FONT).setFontSize(10).setFontColor(COLORS.label);
+  sheet.getRange(1, 1, PAGE_ROWS, LAST_COL + 1).setBackground(COLORS.page).setFontFamily(FONT).setFontSize(10).setFontColor(COLORS.label);
 
   sheet.getRange('A1:A2').setValues([['Team'], ['Quarter']]).setFontSize(8).setFontColor(COLORS.muted);
   sheet.getRange('B1:B2').setValues([[team], [quarter]]).setBackground(COLORS.card).setFontWeight('bold').setFontColor(COLORS.ink)
@@ -255,32 +295,57 @@ function addPercentBar(sheet, row, col, width) {
   sheet.setConditionalFormatRules(rules);
 }
 
-// Side-by-side lists ([title, items, column]), four columns wide. Returns the row after the longest list.
-function writeLists(sheet, row, lists) {
-  const height = Math.max(1, ...lists.map(([, items]) => items.length));
-  lists.forEach(([title, items, col]) => {
-    sheet.getRange(row, col, 1, 4).merge().setValue(`${title} (${items.length})`).setFontWeight('bold').setFontColor(COLORS.ink).setFontSize(9)
+const link = (text, url) => ({ text: text || '-', url: url || '' });
+const oppRow = (o, middle) => [link(o.account, o.accountUrl), link(o.name, o.url), middle(o) || '', o.closeDate || '', o.deltaArr, o.owner || ''];
+
+// Side-by-side tables ({ title, col, columns, rows }), TABLE_WIDTH columns wide: title row, header row, one row per
+// item (or a single "-" row). Link cells become Salesforce hyperlinks. Returns the row after the tallest table.
+function writeTables(sheet, row, tables) {
+  const height = Math.max(1, ...tables.map(t => t.rows.length));
+  tables.forEach(({ title, col, columns, rows }) => {
+    sheet.getRange(row, col, 1, TABLE_WIDTH).merge().setValue(title).setFontWeight('bold').setFontColor(COLORS.ink).setFontSize(9)
       .setBackground(COLORS.card).setVerticalAlignment('middle')
       .setBorder(null, null, true, null, false, false, COLORS.ink, SpreadsheetApp.BorderStyle.SOLID);
     sheet.setRowHeight(row, 24);
-    const body = sheet.getRange(row + 1, col, height, 4);
-    body.setBackground(COLORS.card);
-    if (items.length) sheet.getRange(row + 1, col, items.length, 1).setValues(items.map(item => [item]));
-    else sheet.getRange(row + 1, col).setValue('-').setFontColor(COLORS.muted);
-    sheet.getRange(row, col, height + 1, 4).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
+    sheet.getRange(row + 1, col, 1, TABLE_WIDTH).setBackground(COLORS.card).setFontColor(COLORS.muted).setFontSize(8).setVerticalAlignment('middle');
+    sheet.getRange(row + 1, col, 1, columns.length).setValues([columns.map(([header]) => header)])
+      .setBorder(null, null, true, null, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
+    sheet.getRange(row + 2, col, height, TABLE_WIDTH).setBackground(COLORS.card).setVerticalAlignment('middle');
+    if (rows.length) {
+      const plain = rows.map(r => r.map(v => (v && typeof v === 'object' ? v.text : v == null ? '' : v)));
+      sheet.getRange(row + 2, col, rows.length, columns.length).setValues(plain)
+        .setBorder(null, null, null, null, false, true, COLORS.line, SpreadsheetApp.BorderStyle.SOLID);
+    } else {
+      sheet.getRange(row + 2, col).setValue('-').setFontColor(COLORS.muted);
+    }
+    columns.forEach(([, kind], i) => {
+      const numeric = NUMERIC_KINDS.indexOf(kind) >= 0;
+      sheet.getRange(row + 1, col + i, height + 1, 1).setHorizontalAlignment(numeric ? 'right' : 'left');
+      if (!rows.length) return;
+      const cells = sheet.getRange(row + 2, col + i, rows.length, 1);
+      if (FORMATS[kind]) cells.setNumberFormat(FORMATS[kind]);
+      if (kind === 'link') cells.setRichTextValues(rows.map(r => [linkValue(r[i])]));
+      if (kind === 'text' || kind === 'link') cells.setWrap(true);
+    });
+    sheet.getRange(row, col, height + 2, TABLE_WIDTH).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
   });
-  return row + 1 + height;
+  return row + 2 + height;
+}
+
+function linkValue(cell) {
+  const value = SpreadsheetApp.newRichTextValue().setText(String(cell.text));
+  if (cell.url) value.setLinkUrl(cell.url);
+  return value.build();
 }
 
 // Trend table at column T (header row 6, one row per quarter Q1-2026 -> selected).
-// Returns { key: A1 range of that column's values } plus quarterCount and column(key, withHeader).
+// Returns { key: A1 range of that column's values } plus quarterCount.
 function writeTrendData(sheet, trendRows) {
   const body = trendRows.map(m => TREND_KEYS.map(key => (m[key] == null ? '' : m[key])));
   sheet.getRange(5, DATA_COL).setValue('Data behind the sparklines and charts (do not edit)').setFontColor(COLORS.muted).setFontSize(8);
   sheet.getRange(6, DATA_COL, 1, TREND_KEYS.length).setValues([TREND_KEYS]).setFontWeight('bold').setFontColor(COLORS.muted).setFontSize(8);
   sheet.getRange(7, DATA_COL, body.length, TREND_KEYS.length).setValues(body).setFontColor(COLORS.muted).setFontSize(8);
   const trend = { quarterCount: body.length };
-  trend.column = key => sheet.getRange(6, DATA_COL + TREND_KEYS.indexOf(key), body.length + 1, 1);
   TREND_KEYS.forEach((key, i) => { trend[key] = sheet.getRange(7, DATA_COL + i, body.length, 1).getA1Notation(); });
   return trend;
 }
@@ -324,49 +389,48 @@ function writeCharts(sheet, row, view, trend) {
   dataRow += 4;
   const forecast = writeDataBlock(sheet, dataRow, [['Quarter', 'Goal', 'Net Forecast', 'Pipeline']]
     .concat(view.future.map(f => [f.quarter, f.revenueGoal, f.netForecastArr, f.pipelineArr])));
+  dataRow += view.future.length + 2;
+  // Contiguous copies of the trend columns: embedded charts are only reliable on a single block.
+  const netTrend = writeDataBlock(sheet, dataRow, [['Quarter', 'Goal', 'Net Added ARR', 'Churn ARR']]
+    .concat(view.trend.map(t => [t.quarter, t.revenueGoal || 0, t.netAddedArr, t.churnArr])));
+  dataRow += view.trend.length + 2;
+  const arrTrend = writeDataBlock(sheet, dataRow, [['Quarter', 'Ending ARR']].concat(view.trend.map(t => [t.quarter, t.endingArr])));
 
-  const chart = type => sheet.newChart().setChartType(type).setNumHeaders(1)
-    .setOption('legend', { position: 'bottom', textStyle: { color: COLORS.muted, fontSize: 10 } })
-    .setOption('titleTextStyle', { color: COLORS.ink, fontSize: 13, bold: true })
-    .setOption('backgroundColor', COLORS.card)
-    .setOption('fontName', FONT)
-    .setOption('chartArea', { left: 60, top: 40, width: '85%', height: '65%' });
+  // Only options from the embedded-chart subset (title, legend, colors, axes, stacking): anything fancier can
+  // leave Sheets drawing the title with an empty plot.
+  const chart = (type, title) => sheet.newChart().setChartType(type).setNumHeaders(1)
+    .setOption('useFirstColumnAsDomain', true)
+    .setOption('title', title)
+    .setOption('legend', { position: 'bottom' });
   const place = (builder, r, c) => sheet.insertChart(
     builder.setPosition(r, c, 0, 0).setOption('width', 600).setOption('height', 300).build()
   );
   const rowsPerChart = 15;
 
-  place(chart(Charts.ChartType.COLUMN).addRange(waterfall)
-    .setOption('title', `ARR bridge ${view.quarter}`)
+  // The base series is drawn in the card colour so only the movements show.
+  place(chart(Charts.ChartType.COLUMN, `ARR bridge ${view.quarter}`).addRange(waterfall)
     .setOption('isStacked', true)
-    .setOption('series', { 0: { color: 'transparent', visibleInLegend: false }, 1: { color: COLORS.up }, 2: { color: COLORS.down } })
-    .setOption('vAxis', { format: 'short', gridlines: { color: COLORS.line }, viewWindow: { min: bridgeFloor } }), row, 2);
-  place(chart(Charts.ChartType.BAR).addRange(attainment)
-    .setOption('title', `Attainment vs goal ${view.quarter}`)
-    .setOption('hAxis', { format: 'percent', minValue: 0, maxValue: 1, gridlines: { color: COLORS.line } })
+    .setOption('colors', [COLORS.card, COLORS.up, COLORS.down])
+    .setOption('vAxis', { format: 'short', viewWindow: { min: bridgeFloor } }), row, 2);
+  place(chart(Charts.ChartType.BAR, `Attainment vs goal ${view.quarter}`).addRange(attainment)
+    .setOption('hAxis', { format: 'percent', viewWindow: { min: 0, max: 1 } })
     .setOption('legend', { position: 'none' })
     .setOption('colors', [COLORS.accent]), row, 8);
   row += rowsPerChart;
-  place(chart(Charts.ChartType.PIE).addRange(renewals)
-    .setOption('title', `Renewals ${view.quarter}: won vs lost`)
+  place(chart(Charts.ChartType.PIE, `Renewals ${view.quarter}: won vs lost`).addRange(renewals)
     .setOption('pieHole', 0.55)
     .setOption('colors', [COLORS.up, COLORS.down]), row, 2);
-  place(chart(Charts.ChartType.COLUMN).addRange(forecast)
-    .setOption('title', 'Q+1 / Q+2 forecast vs goal')
+  place(chart(Charts.ChartType.COLUMN, 'Q+1 / Q+2 forecast vs goal').addRange(forecast)
     .setOption('colors', [COLORS.muted, COLORS.accent, COLORS.accentSoft])
-    .setOption('vAxis', { format: 'short', gridlines: { color: COLORS.line } }), row, 8);
+    .setOption('vAxis', { format: 'short' }), row, 8);
   row += rowsPerChart;
-  place(chart(Charts.ChartType.LINE)
-    .addRange(trend.column('quarter')).addRange(trend.column('revenueGoal')).addRange(trend.column('netAddedArr')).addRange(trend.column('churnArr'))
-    .setOption('title', 'Net Added ARR vs goal by quarter')
+  place(chart(Charts.ChartType.LINE, 'Net Added ARR vs goal by quarter').addRange(netTrend)
     .setOption('colors', [COLORS.muted, COLORS.accent, COLORS.down])
     .setOption('pointSize', 5)
-    .setOption('vAxis', { format: 'short', gridlines: { color: COLORS.line } }), row, 2);
-  place(chart(Charts.ChartType.LINE)
-    .addRange(trend.column('quarter')).addRange(trend.column('endingArr'))
-    .setOption('title', 'Ending ARR by quarter')
+    .setOption('vAxis', { format: 'short' }), row, 2);
+  place(chart(Charts.ChartType.LINE, 'Ending ARR by quarter').addRange(arrTrend)
     .setOption('colors', [COLORS.ink])
     .setOption('pointSize', 5)
     .setOption('legend', { position: 'none' })
-    .setOption('vAxis', { format: 'short', gridlines: { color: COLORS.line } }), row, 8);
+    .setOption('vAxis', { format: 'short' }), row, 8);
 }
