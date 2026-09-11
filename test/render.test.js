@@ -57,9 +57,9 @@ test('team tab renders every block, six KPI cards and six charts', () => {
   const values = Object.values(sheet.cells).map(c => c.value);
   assert.equal(sheet.cell(1, 2).value, 'Europe - DACH');
   assert.equal(sheet.cell(2, 2).value, 'Q2-2026');
-  assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q2-2026 QBR');
+  assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q2-2026 QBR - ACTUALS (quarter closed)');
   ['Net Added ARR', 'Starting ARR', 'Forecast Ending ARR', '# Active Customers', 'Top 3 Churns'].forEach(label => assert.ok(values.includes(label), label));
-  ['PREVIOUS QUARTER', 'FUTURE QUARTER(S)', 'PARTNER CONTRIBUTION', 'CHARTS'].forEach(label => assert.ok(values.includes(label), label));
+  ['ACTUALS QUARTER', 'FUTURE QUARTER(S)', 'PARTNER CONTRIBUTION', 'CHARTS'].forEach(label => assert.ok(values.includes(label), label));
   assert.equal(sheet.charts.length, 6);
   assert.equal(sheet.frozenRows, 3);
   assert.ok(sheet.getMaxColumns() >= 20 + vm.runInContext('TREND_KEYS', ctx).length, 'sheet widened for the data area');
@@ -92,7 +92,7 @@ function tableRows(sheet, prefix) {
 test('linked tables: churn vs lost pipeline, renewals, top customers, top deals, every name links to Salesforce', () => {
   const sheet = render(sampleView('Q3-2026'));
 
-  const logos = tableRows(sheet, 'Logos Won');
+  const logos = tableRows(sheet, 'Logos Won (1)');
   assert.equal(logos.title, 'Logos Won (1)');
   assert.deepEqual(logos.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
   assert.equal(logos.rows[0][0].value, 'Zalando');
@@ -299,7 +299,45 @@ test('Europe roll-up banner names its members', () => {
   const view = Object.assign(sampleView('Q3-2026'), { team: 'Europe', members: ['Europe - Nordics', 'Europe - Benelux', 'Europe - UKI', 'Europe - DACH', 'Europe - South'] });
   const sheet = render(view);
   assert.equal(sheet.cell(1, 2).value, 'Europe');
-  assert.equal(sheet.cell(3, 2).value, 'Europe   Q3-2026 QBR   (roll-up of Nordics, Benelux, UKI, DACH, South)');
+  assert.equal(sheet.cell(3, 2).value, 'Europe   Q3-2026 QBR - FORECAST (quarter in progress, 49% elapsed)   (roll-up of Nordics, Benelux, UKI, DACH, South)');
+});
+
+test('an open quarter is labelled FORECAST and separates expected logos from logos actually won', () => {
+  const sheet = render(sampleView('Q3-2026'));
+  const values = Object.values(sheet.cells).map(c => c.value);
+  assert.ok(values.includes('FORECAST QUARTER'));
+  assert.ok(!values.includes('ACTUALS QUARTER'));
+  const metric = label => {
+    const cell = cellsWhere(sheet, c => c.value === label)[0];
+    return sheet.cell(cell.row, cell.col + 1).value;
+  };
+  // Helaba (Major) open Expand at 0.5 expected logo impact; Zalando's Land is won but not a Major.
+  assert.equal(metric('Logo Attainment (expected, incl. open opps)'), 0.5);
+  assert.equal(metric('Logos Won (Closed Won Land, Majors)'), 0);
+  assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q3-2026 QBR - FORECAST (quarter in progress, 49% elapsed)');
+
+  const closed = render(sampleView('Q2-2026'));
+  const q2 = label => { const cell = cellsWhere(closed, c => c.value === label)[0]; return closed.cell(cell.row, cell.col + 1).value; };
+  assert.equal(q2('Logo Attainment (expected, incl. open opps)'), 0, 'Helaba won (+1) nets against Deutsche Telekom churn (-1)');
+  assert.equal(q2('Logos Won (Closed Won Land, Majors)'), 1);
+});
+
+test('Top 10 Deals Won lists the quarter\'s Closed Won opps with links and ties out to Net Added ARR', () => {
+  const sheet = render(sampleView('Q3-2026'));
+  const deals = tableRows(sheet, 'Top 10 Deals Won Q3-2026');
+  assert.equal(deals.title, 'Top 10 Deals Won Q3-2026 (3 Closed Won, $78K Delta ARR)');
+  assert.deepEqual(deals.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
+  assert.deepEqual(deals.rows.map(r => r[0].value), ['Zalando', 'CompuGroup', 'Julius Baer']);
+  assert.deepEqual(deals.rows.map(r => r[2].value), ['Land', 'Renewal', 'Renewal']);
+  assert.deepEqual(deals.rows.map(r => r[4].value), [96000, 12000, -30000]);
+  deals.rows.forEach(r => {
+    assert.match(r[0].link, /\/lightning\/r\/Account\//);
+    assert.equal(r[1].value, 'Link');
+    assert.match(r[1].link, /\/lightning\/r\/Opportunity\//);
+  });
+  // Closed Won 78,000 + full churn (Bolt -84,000) = Net Added ARR.
+  assert.equal(sheet.cell(5, 2).value, 'NET ADDED ARR');
+  assert.equal(sheet.cell(6, 2).value, 78000 - 84000);
 });
 
 const RAW_HEADER = vm.runInContext('RAW_HEADER', ctx);

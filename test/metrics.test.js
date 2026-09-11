@@ -8,7 +8,7 @@ const ctx = vm.createContext({});
 ['Config.gs', 'Metrics.gs', 'Definitions.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 const { quarterMetrics, forecastMetrics, accountMetrics, partnerMetrics, shiftQuarter, quarterOfDate, teamToken, quartersBetween,
   teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions, rollupMembers, withArr, withPace, quarterElapsed,
-  quarterStart, ownerMetrics, dataQualityIssues } = ctx;
+  quarterStart, ownerMetrics, dataQualityIssues, statusText } = ctx;
 const ROLLUP_TEAMS = vm.runInContext('ROLLUP_TEAMS', ctx);
 const TEAMS = vm.runInContext('TEAMS', ctx);
 
@@ -206,6 +206,11 @@ test('quarter elapsed and pace: attainment relative to the share of the quarter 
   assert.equal(m.quarterElapsedPct, 45 / 92);
   assert.equal(m.pace, 0.25 / (45 / 92));
   assert.equal(withPace({ quarter: 'Q3-2026', attainment: null }, '2026-09-15').pace, null);
+  assert.equal(m.status, 'FORECAST');
+  assert.equal(statusText(m), 'FORECAST (quarter in progress, 49% elapsed)');
+  const closed = withPace({ quarter: 'Q2-2026', attainment: 1 }, '2026-09-15');
+  assert.equal(closed.status, 'ACTUALS');
+  assert.equal(statusText(closed), 'ACTUALS (quarter closed)');
 });
 
 test('future quarters list open renewals due with the account ARR at stake, each account counted once', () => {

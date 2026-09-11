@@ -17,11 +17,14 @@ function definitionRows() {
     ['Scope', 'Roll-up tab', `${Object.keys(ROLLUP_TEAMS).map(t => `"${t}" = ${ROLLUP_TEAMS[t].join(' + ')}`).join('; ')}. Opportunities stay attributed to their specific team; the roll-up sums the members' opportunities, accounts, goals and ARR Ledger rows.`, '-'],
     ['Scope', 'Links', 'Every account / opportunity name in the tables links to its Salesforce record (Lightning URL). Raw Data has the URLs as columns.', 'Opportunity.Id, AccountId'],
 
+    ['Scope', 'Forecast vs actuals', 'The banner and the quarter block are labelled FORECAST while the selected quarter is in progress (its numbers are closed deals to date plus, where stated, open opportunities) and ACTUALS once the quarter has ended.', 'Refresh date vs quarter end'],
+
     ['Quarter actuals', 'Revenue Goal', 'Sum of Goal Value of "Net ARR" goals whose Period Start falls in the quarter, over every Salesforce team matching B1.', 'Goal__c: Goal_Type__c = "Net ARR", Value__c, Period_Start__c, Team2__c'],
     ['Quarter actuals', 'Net Added ARR', 'Sum of Delta ARR of Closed Won opportunities + Sum of Delta ARR of Closed Lost renewals.', 'Opportunity.NACV__c, StageName'],
     ['Quarter actuals', 'Attainment (%)', 'Net Added ARR / Revenue Goal. Attainment-style percentages are coloured green >= 100%, amber 70-99%, red < 70%.', '-'],
     ['Quarter actuals', 'Logo Goal', 'Sum of Count Value of "New Logos" goals whose Period Start falls in the quarter.', 'Goal__c: Goal_Type__c = "New Logos", Count_Value__c'],
-    ['Quarter actuals', 'Logo attainment', 'Sum of Expected Logo Impact of the quarter\'s opportunities on Major accounts (a churned logo counts -1).', 'Opportunity.Expected_Logo_Impact__c, Account.Major_Admin_Tag__c'],
+    ['Quarter actuals', 'Logo attainment (expected, incl. open opps)', 'Sum of Expected Logo Impact of all the quarter\'s opportunities on Major accounts, open ones included (a churned logo counts -1). Until the quarter closes this is a forecast, not landed logos.', 'Opportunity.Expected_Logo_Impact__c, Account.Major_Admin_Tag__c'],
+    ['Quarter actuals', 'Logos Won (Closed Won Land, Majors)', 'Number of Closed Won opportunities of Type "Land" on Major accounts: logos actually landed in the quarter.', 'Opportunity.Type, StageName, Account.Major_Admin_Tag__c'],
     ['Quarter actuals', 'New logos', 'Number of Closed Won opportunities of Type "Land".', 'Opportunity.Type'],
     ['Quarter actuals', 'Downgrade ARR / #', 'Closed Won renewals with Delta ARR < 0: Sum of Delta ARR and count.', 'Opportunity.NACV__c, RecordType'],
     ['Quarter actuals', 'Full churn ARR / #', 'Closed Lost renewals: Sum of Delta ARR and count.', 'Opportunity.NACV__c, RecordType'],
@@ -42,6 +45,7 @@ function definitionRows() {
     ['Quarter actuals', 'Renewal rate (%)', 'Won renewals / (won renewals + lost renewals).', '-'],
     ['Quarter actuals', 'Top churns', 'Three downgrades / full churns with the most negative Delta ARR.', 'Opportunity.NACV__c'],
     ['Quarter actuals', 'Churn reasons', 'Distinct Closed Lost reasons of the downgrades / full churns.', 'Opportunity.Closed_Lost_Reason_List__c, Closed_Lost_Reason__c'],
+    ['Quarter actuals', 'Top 10 Deals Won (table)', 'The quarter\'s Closed Won opportunities (any type), largest Delta ARR first; the title shows the Closed Won count and Sum of Delta ARR that feed Net Added ARR.', 'Opportunity.NACV__c, StageName'],
     ['Quarter actuals', 'Logos Won (table)', 'Closed Won "Land" opportunities of the quarter, largest Delta ARR first.', 'Opportunity.Type, StageName'],
     ['Quarter actuals', 'Lost Pipeline (table) / Lost pipeline # / $', 'Closed Lost non-renewal opportunities (Land, Expand...): list, count and Sum of Delta ARR. This is lost pipeline, not churn.', 'Opportunity.NACV__c, RecordType'],
     ['Quarter actuals', 'Churned Customers (table)', 'Closed Lost renewals of the quarter (the full churns), most negative Delta ARR first. Same rows as Renewals Lost.', 'Opportunity.RecordType, StageName'],

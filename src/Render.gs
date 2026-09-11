@@ -42,7 +42,8 @@ const PREVIOUS_ROWS = [
   ['Open pipeline (this quarter)', 'money', 'openPipelineArr'],
   ['Pipeline coverage of remaining goal', 'mult', 'pipelineCoverage'],
   ['Logo Goal', 'int', 'logoGoal'],
-  ['Logo Attainment', 'int', 'logoAttainment'],
+  ['Logo Attainment (expected, incl. open opps)', 'int', 'logoAttainment'],
+  ['Logos Won (Closed Won Land, Majors)', 'int', 'logosWonMajors'],
   ['Logo Attainment (%)', 'pct', 'logoAttainmentPct'],
   ['# Renewals', 'int', 'renewals'],
   ['# Won Renewals', 'int', 'wonRenewals'],
@@ -116,7 +117,8 @@ const KPI_NOTES = {
   openPipelineArr: 'Delta ARR of open opportunities with a close date in the selected quarter.',
   pipelineCoverage: 'Open pipeline / remaining goal (goal - Net Added ARR); empty once the goal is met. Future quarters: pipeline / goal.',
   logoGoal: 'New Logos goal for the quarter.',
-  logoAttainment: 'Sum of Expected Logo Impact on Major accounts (churned logos count -1).',
+  logoAttainment: 'Sum of Expected Logo Impact of all the quarter\'s opportunities on Major accounts, open ones included (churned logos count -1). A forecast until the quarter closes.',
+  logosWonMajors: 'Number of Closed Won "Land" opportunities on Major accounts: logos actually landed so far this quarter.',
   logoAttainmentPct: 'Logo Attainment / Logo Goal (attainment below 0 counts as 0).',
   renewals: 'Won renewals + full churn (Closed Won + Closed Lost renewal opportunities).',
   wonRenewals: 'Closed Won opportunities of record type Renewal or Fed - Renewal.',
@@ -158,7 +160,7 @@ const KPI_NOTES = {
 };
 
 // Metrics kept per quarter in the data area (drives sparklines and the trend chart).
-const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logoAttainmentPct', 'endingArr',
+const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logosWonMajors', 'logoAttainmentPct', 'endingArr',
   'renewals', 'wonRenewals', 'renewalRate', 'churnArr', 'churnCustomers', 'activeCustomers', 'conversionRate', 'lostPipelineCount',
   'lostPipelineArr', 'partnerNetAddedArr', 'partnerNewLogos', 'partnerChurnArr', 'partnerChurnCustomers', 'grr', 'nrr', 'pace',
   'openPipelineArr', 'pipelineCoverage'];
@@ -171,10 +173,11 @@ function renderTeamTab(sheet, view) {
   const previous = view.trend.length > 1 ? view.trend[view.trend.length - 2] : null;
 
   const members = view.members && view.members.length > 1 ? `   (roll-up of ${view.members.map(teamToken).join(', ')})` : '';
-  writeBanner(sheet, 3, view.team, `${view.quarter} QBR${members}`);
+  const status = statusText(view.current);
+  writeBanner(sheet, 3, view.team, `${view.quarter} QBR - ${status}${members}`);
   let row = writeKpiCards(sheet, 5, view.current, previous) + 1;
 
-  row = writeSection(sheet, row, 'PREVIOUS QUARTER', `${view.quarter} actuals vs goal, QoQ vs ${previous ? previous.quarter : 'n/a'}, trend from ${FIRST_QUARTER}`);
+  row = writeSection(sheet, row, `${view.current.status} QUARTER`, `${view.quarter} ${status.toLowerCase()} vs goal, QoQ vs ${previous ? previous.quarter : 'n/a'}, trend from ${FIRST_QUARTER}`);
   row = Math.max(
     writeBlock(sheet, row, 2, trendHeader('Metric'), PREVIOUS_ROWS, [view.current], previous, sparklines),
     writeBlock(sheet, row, 7, ['ARR bridge', view.quarter, '% of Starting'], ARR_ROWS, [view.current], null, null, view.current.startingArr),
@@ -183,8 +186,12 @@ function renderTeamTab(sheet, view) {
   const lists = view.current.lists;
   const oppTable = (title, col, columns, opps, middle) => ({ title: `${title} (${opps.length})`, col, columns, rows: opps.map(o => oppRow(o, middle)) });
   row = writeTables(sheet, row, [
-    oppTable('Logos Won', 2, OPP_COLUMNS, lists.logosWon, o => o.type),
-    oppTable('Lost Pipeline', 9, OPP_COLUMNS, lists.lostPipeline, o => o.type),
+    { title: `Top ${TOP_N} Deals Won ${view.quarter} (${view.current.wonCount} Closed Won, ${formatMoney(view.current.wonArr)} Delta ARR)`,
+      col: 2, columns: OPP_COLUMNS, rows: lists.dealsWon.map(o => oppRow(o, x => x.type)) },
+    oppTable('Logos Won', 9, OPP_COLUMNS, lists.logosWon, o => o.type),
+  ]) + 1;
+  row = writeTables(sheet, row, [
+    oppTable('Lost Pipeline', 2, OPP_COLUMNS, lists.lostPipeline, o => o.type),
   ]) + 1;
   row = writeTables(sheet, row, [
     oppTable('Churned Customers', 2, RENEWAL_COLUMNS, lists.churned, o => o.recordType),

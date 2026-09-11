@@ -27,6 +27,7 @@ function quarterMetrics(opps, quarter, goal) {
   const fullChurnArr = sum(fullChurn, 'deltaArr');
   const churnArr = downgradeArr + fullChurnArr;
   const logoAttainment = sum(rows.filter(o => o.major), 'expectedLogoImpact');
+  const logosWonMajors = won.filter(o => o.type === 'Land' && o.major).length;
   const newLogoArr = sum(won.filter(o => o.type === 'Land'), 'deltaArr');
   const open = rows.filter(o => !o.isClosed);
   const openPipelineArr = sum(open, 'deltaArr');
@@ -39,8 +40,11 @@ function quarterMetrics(opps, quarter, goal) {
     attainment: ratio(netAddedArr, goal.revenue),
     logoGoal: goal.logos,
     logoAttainment,
+    logosWonMajors,
     logoAttainmentPct: ratio(Math.max(0, logoAttainment), goal.logos),
     addedArr: netAddedArr - churnArr,
+    wonCount: won.length,
+    wonArr: sum(won, 'deltaArr'),
     downgradeArr,
     downgradeCount: downgrades.length,
     fullChurnArr,
@@ -65,6 +69,7 @@ function quarterMetrics(opps, quarter, goal) {
     newLogos: won.filter(o => o.type === 'Land').length,
     // Opportunity lists behind the linked tables on the tab.
     lists: {
+      dealsWon: byField(won, 'deltaArr', true).slice(0, TOP_N),
       logosWon: byField(won.filter(o => o.type === 'Land'), 'deltaArr', true),
       lostPipeline: byField(lostPipeline, 'deltaArr', true),
       churned: byField(fullChurn, 'deltaArr', false),
@@ -151,12 +156,20 @@ function withArr(metrics, ledgerEntry) {
 }
 
 // Linearity: how far through the quarter we are vs how far through the goal. Past quarters are fully elapsed.
+// A quarter's numbers are a forecast until its last day has passed, actuals afterwards.
 function withPace(metrics, today) {
   const quarterElapsedPct = quarterElapsed(metrics.quarter, today);
   return Object.assign(metrics, {
     quarterElapsedPct,
     pace: metrics.attainment == null ? null : ratio(metrics.attainment, quarterElapsedPct),
+    status: quarterElapsedPct < 1 ? 'FORECAST' : 'ACTUALS',
   });
+}
+
+function statusText(metrics) {
+  return metrics.status === 'ACTUALS'
+    ? 'ACTUALS (quarter closed)'
+    : `FORECAST (quarter in progress, ${Math.round((metrics.quarterElapsedPct || 0) * 100)}% elapsed)`;
 }
 
 // One row per opportunity owner for the selected quarter, best Net Added ARR first.
