@@ -194,6 +194,7 @@ function buildView(team, quarter) {
     goals: sumGoals(members.map(fetchGoals)),
     ledgers,
     unassignedAccounts: fetchRegionOnlyAccounts(team),
+    reps: fetchRepPerformance(team, quarter, todayIso()),
     today: todayIso(),
   });
 }

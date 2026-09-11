@@ -5,10 +5,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const ctx = vm.createContext({});
-['Config.gs', 'Metrics.gs', 'Definitions.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
+['Config.gs', 'Metrics.gs', 'Definitions.gs', 'Reps.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 const { quarterMetrics, forecastMetrics, accountMetrics, partnerMetrics, shiftQuarter, quarterOfDate, teamToken, quartersBetween,
   teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions, rollupMembers, withArr, withPace, quarterElapsed,
-  quarterStart, ownerMetrics, dataQualityIssues, statusText } = ctx;
+  quarterStart, ownerMetrics, dataQualityIssues, statusText, repMetrics, daysBetween } = ctx;
 const ROLLUP_TEAMS = vm.runInContext('ROLLUP_TEAMS', ctx);
 const TEAMS = vm.runInContext('TEAMS', ctx);
 
@@ -208,9 +208,52 @@ test('quarter elapsed and pace: attainment relative to the share of the quarter 
   assert.equal(withPace({ quarter: 'Q3-2026', attainment: null }, '2026-09-15').pace, null);
   assert.equal(m.status, 'FORECAST');
   assert.equal(statusText(m), 'FORECAST (quarter in progress, 49% elapsed)');
+  assert.equal(m.phase, 'in progress');
   const closed = withPace({ quarter: 'Q2-2026', attainment: 1 }, '2026-09-15');
   assert.equal(closed.status, 'ACTUALS');
+  assert.equal(closed.phase, 'closed');
   assert.equal(statusText(closed), 'ACTUALS (quarter closed)');
+  // A quarter that has not started is a forecast too, but not "in progress".
+  const future = withPace({ quarter: 'Q4-2026', attainment: 0 }, '2026-09-15');
+  assert.equal(future.status, 'FORECAST');
+  assert.equal(future.phase, 'not started');
+  assert.equal(future.quarterElapsedPct, 0);
+  assert.equal(statusText(future), 'FORECAST (quarter not started)');
+  // Last day of the quarter: still in progress, 100% is only reached once the quarter has ended.
+  assert.equal(withPace({ quarter: 'Q3-2026', attainment: 0 }, '2026-10-31').phase, 'in progress');
+  assert.equal(withPace({ quarter: 'Q3-2026', attainment: 0 }, '2026-11-01').phase, 'closed');
+});
+
+test('future quarters list predicted churn: renewals with a negative Expected Delta ARR, most negative first', () => {
+  const opps = [
+    opp('Q4-2026', '2- Qualification', 'A', 'Renewal', 'Renewal', 0, 0, { expectedDeltaArr: -50000, accountId: 'a1' }),
+    opp('Q4-2026', 'Closed Lost', 'B', 'Renewal', 'Renewal', -120000, -1, { expectedDeltaArr: -120000, expectedLogoImpact: -1, accountId: 'b1' }),
+    opp('Q4-2026', '3- Proposal', 'C', 'Renewal', 'Renewal', 0, 0, { expectedDeltaArr: 20000, accountId: 'c1' }),
+    opp('Q4-2026', '3- Proposal', 'D', 'Renewal', 'Renewal', 0, 0, { expectedDeltaArr: 0, accountId: 'd1' }),
+  ];
+  const accounts = [{ id: 'a1', currentArr: 300000 }, { id: 'b1', currentArr: 120000 }, { id: 'c1', currentArr: 90000 }, { id: 'd1', currentArr: 40000 }];
+  const f = forecastMetrics(opps, 'Q4-2026', 1000000, { revenue: 0, logos: 0 }, accounts);
+  assert.deepEqual(f.predictedChurn.map(o => o.account), ['B', 'A']);
+  assert.deepEqual(f.predictedChurn.map(o => o.accountArr), [120000, 300000]);
+  assert.equal(f.forecastChurnArr, -170000);
+  assert.equal(f.forecastChurnCount, 1);
+  assert.deepEqual(f.renewalsDue.map(o => o.account), ['A', 'C', 'D']);
+});
+
+test('rep metrics: ratios against goal / owned accounts, months in seat, nulls when there is no denominator', () => {
+  const rep = { userId: 'u1', name: 'Berry', createdDate: '2025-03-26' };
+  const m = repMetrics(rep, { accountsOwned: 34, repGoal: 25750000, fyWonArr: 3256460, coverageArr: 7441460, meetings: 62, activities: 197,
+    coveredAccounts: 4, pipelineCreatedArr: 615000, pipelineCreatedCount: 3, stalledArr: 60000, stalledCount: 1 }, '2026-09-11');
+  assert.equal(m.monthsInSeat, 17.5);
+  assert.equal(m.attainmentPct, 3256460 / 25750000);
+  assert.equal(m.coveragePct, 7441460 / 25750000);
+  assert.equal(m.activityCoveragePct, 4 / 34);
+  assert.equal(m.renewalRiskPct, null);
+  const fresh = repMetrics({ userId: 'u2', name: 'New', createdDate: null }, {}, '2026-09-11');
+  assert.equal(fresh.monthsInSeat, null);
+  assert.equal(fresh.attainmentPct, null);
+  assert.equal(fresh.meetings30d, 0);
+  assert.equal(daysBetween('2026-08-01', '2026-09-11'), 41);
 });
 
 test('future quarters list open renewals due with the account ARR at stake, each account counted once', () => {
@@ -266,7 +309,8 @@ test('definitions tab covers every block of a team tab', () => {
   rows.forEach(row => assert.equal(row.length, 4, JSON.stringify(row)));
   const metrics = rows.map(r => r[1]).join(' | ');
   ['Net Added ARR', 'Downgrade', 'Full churn', 'Starting ARR', 'Ending ARR', 'Renewal rate', 'Logo attainment', 'Net Forecast',
-    'Pipeline', 'Active customers', 'Partner'].forEach(name => assert.ok(metrics.indexOf(name) >= 0, name));
+    'Pipeline', 'Active customers', 'Partner', 'Predicted Churn (tables)', 'Reps (table)', 'Meetings (30d)', 'Renewal risk']
+    .forEach(name => assert.ok(metrics.indexOf(name) >= 0, name));
   assert.ok(rows.some(r => r[2].indexOf('Christian Lawless') >= 0));
   assert.ok(rows.some(r => r[2].indexOf('"Renewal" or "Fed - Renewal"') >= 0));
 });

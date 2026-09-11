@@ -28,11 +28,11 @@ const previewAccounts = dachAccounts.concat([
 ]);
 
 const ctx = vm.createContext(globals());
-['Config.gs', 'Metrics.gs', 'Render.gs', 'RawData.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
+['Config.gs', 'Metrics.gs', 'Reps.gs', 'Render.gs', 'RawData.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 
 // buildView() from Main.gs without Salesforce: the ledger is the seeded DACH values rolled forward with Net Added ARR.
 const TODAY = '2026-09-15';
-function sampleView(quarter = 'Q2-2026', opps = dach, accounts = dachAccounts, unassignedAccounts = []) {
+function sampleView(quarter = 'Q2-2026', opps = dach, accounts = dachAccounts, unassignedAccounts = [], reps = []) {
   const goals = {
     'Q1-2026': { revenue: 2000000, logos: 0 }, 'Q2-2026': { revenue: 6700000, logos: 1 }, 'Q3-2026': { revenue: 7500000, logos: 2 },
     'Q4-2026': { revenue: 8000000, logos: 2 }, 'Q1-2027': { revenue: 8500000, logos: 3 },
@@ -43,7 +43,7 @@ function sampleView(quarter = 'Q2-2026', opps = dach, accounts = dachAccounts, u
     const prevEnding = ledger[ctx.shiftQuarter(q, -1)] ? ledger[ctx.shiftQuarter(q, -1)].endingArr : null;
     ledger[q] = ledger[q] || { startingArr: prevEnding, endingArr: prevEnding + ctx.quarterMetrics(opps, q, {}).netAddedArr };
   });
-  return ctx.composeView({ team: 'Europe - DACH', members: ['Europe - DACH'], quarter, opps, accounts, goals, ledgers: [ledger], unassignedAccounts, today: TODAY });
+  return ctx.composeView({ team: 'Europe - DACH', members: ['Europe - DACH'], quarter, opps, accounts, goals, ledgers: [ledger], unassignedAccounts, reps, today: TODAY });
 }
 
 function render(view) {
@@ -338,6 +338,53 @@ test('Top 10 Deals Won lists the quarter\'s Closed Won opps with links and ties 
   // Closed Won 78,000 + full churn (Bolt -84,000) = Net Added ARR.
   assert.equal(sheet.cell(5, 2).value, 'NET ADDED ARR');
   assert.equal(sheet.cell(6, 2).value, 78000 - 84000);
+});
+
+test('with more than ten wins the Top 10 Deals Won title says how much of the quarter it shows', () => {
+  const wins = Array.from({ length: 12 }, (_, i) => opp('Q3-2026', 'Closed Won', `Win ${i + 1}`, 'Expand', 'Enterprise', (i + 1) * 1000, 0));
+  const sheet = render(sampleView('Q3-2026', dach.concat(wins)));
+  const deals = tableRows(sheet, 'Top 10 Deals Won Q3-2026');
+  // 15 wins: fixture 78,000 (incl. Julius Baer -30,000) + 1,000..12,000 = 156,000; the ten largest = 96 + 12 + 12 + 11 + ... + 5 thousand = 176,000.
+  assert.equal(deals.title, 'Top 10 Deals Won Q3-2026 (10 of 15 Closed Won shown: $176K of $156K Delta ARR)');
+  assert.equal(deals.rows.length, 10);
+  assert.equal(deals.rows[0][0].value, 'Zalando');
+  assert.equal(deals.rows[9][0].value, 'Win 5');
+});
+
+test('future quarters get Predicted Churn tables next to Renewals due', () => {
+  const sheet = render(sampleView('Q3-2026'));
+  const q1 = tableRows(sheet, 'Predicted Churn Q+1 Q4-2026');
+  assert.equal(q1.title, 'Predicted Churn Q+1 Q4-2026 (1, -$30K expected)');
+  assert.deepEqual(q1.headers, ['Account', 'Opportunity', 'Close date', 'Current ARR', 'Expected Delta ARR', 'Owner']);
+  assert.equal(q1.rows[0][0].value, 'CompuGroup');
+  assert.equal(q1.rows[0][0].link, accountUrl('CompuGroup'));
+  assert.equal(q1.rows[0][1].value, 'Link');
+  assert.equal(q1.rows[0][3].value, 410000);
+  assert.equal(q1.rows[0][4].value, -30000);
+  const q2 = tableRows(sheet, 'Predicted Churn Q+2 Q1-2027');
+  assert.equal(q2.title, 'Predicted Churn Q+2 Q1-2027 (0, $0 expected)');
+  assert.equal(q2.rows[0][0].value, '-');
+});
+
+test('rep activity & performance table spans the page with one linked row per rep', () => {
+  const rep = (name, over) => Object.assign({ userId: name, name, url: `${SF}/lightning/r/User/${name}/view`, team: 'Europe Majors - DACH', monthsInSeat: 17.5,
+    accountsOwned: 34, repGoal: 25750000, fyWonArr: 3256460, attainmentPct: 3256460 / 25750000, coveragePct: 0.29, meetings30d: 62, activities30d: 197,
+    activityCoveragePct: 4 / 34, pipelineCreatedArr: 615000, stalledArr: 60000, renewalRiskPct: null }, over);
+  const sheet = render(sampleView('Q3-2026', dach, dachAccounts, [], [rep('Anna Berger'), rep('Max Weber', { fyWonArr: 0, attainmentPct: 0, meetings30d: 0 })]));
+  const values = Object.values(sheet.cells).map(c => c.value);
+  assert.ok(values.includes('REP ACTIVITY & PERFORMANCE'));
+  const reps = tableRows(sheet, 'Reps (2)');
+  assert.deepEqual(reps.headers, ['Rep', 'Months in seat', 'Accts owned', 'Rep goal (FY)', 'Won ARR (FY)', 'Attainment', 'Coverage', 'Meetings (30d)',
+    'Activities (30d)', 'Acct coverage (30d)', 'Pipeline created (Q)', 'Stalled >60d', 'Renewal risk']);
+  assert.equal(reps.headers.length, 13, 'B..N');
+  assert.equal(reps.rows[0][0].value, 'Anna Berger');
+  assert.equal(reps.rows[0][0].link, `${SF}/lightning/r/User/Anna Berger/view`);
+  assert.equal(reps.rows[0][4].value, 3256460);
+  assert.equal(reps.rows[0][5].value, 3256460 / 25750000);
+  assert.equal(reps.rows[1][7].value, 0);
+  assert.equal(reps.rows[0][12].value, '');
+  const empty = tableRows(render(sampleView('Q3-2026')), 'Reps (0)');
+  assert.equal(empty.rows[0][0].value, '-');
 });
 
 const RAW_HEADER = vm.runInContext('RAW_HEADER', ctx);

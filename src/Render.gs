@@ -11,7 +11,7 @@ const MIN_TREND_QUARTERS = 4;
 // Attainment-style percentages get red / amber / green instead of a data bar.
 const RAG_KEYS = ['attainment', 'logoAttainmentPct', 'netForecastPct', 'pace'];
 const RAG = { amber: 0.7, green: 1 };
-const TABLE_WIDTH = 6;
+const DEFAULT_TABLE_WIDTH = 6;
 const NUMERIC_KINDS = ['money', 'pct', 'int', 'mult'];
 // Cognition palette: warm off-white page, near-black ink, electric-blue accent, flat white cards.
 const FONT = 'Inter';
@@ -106,6 +106,10 @@ const CUSTOMER_COLUMNS = [['#', 'int'], ['Account', 'link'], ['Team', 'text'], [
 const RENEWAL_DUE_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Close date', 'date'], ['Current ARR', 'money'], ['Expected Delta ARR', 'money'], ['Owner', 'text']];
 const OWNER_COLUMNS = [['Owner', 'text'], ['Net Added ARR', 'money'], ['# Won', 'int'], ['Churn ARR', 'money'], ['Open pipeline (Q)', 'money'], ['Pipeline Q+1', 'money']];
 const QUALITY_COLUMNS = [['Issue', 'text'], ['Account', 'link'], ['Opportunity', 'link'], ['Detail', 'text'], ['Close date', 'date'], ['Owner', 'text']];
+// Full-width rep table (13 columns, B..N), same measures as the Salesforce Majors Rep Performance tab.
+const REP_COLUMNS = [['Rep', 'link'], ['Months in seat', 'mult'], ['Accts owned', 'int'], ['Rep goal (FY)', 'money'], ['Won ARR (FY)', 'money'],
+  ['Attainment', 'pct'], ['Coverage', 'pct'], ['Meetings (30d)', 'int'], ['Activities (30d)', 'int'], ['Acct coverage (30d)', 'pct'],
+  ['Pipeline created (Q)', 'money'], ['Stalled >60d', 'money'], ['Renewal risk', 'pct']];
 
 // Hover note on each metric label (same definitions as the Definitions tab, in one line).
 const KPI_NOTES = {
@@ -186,7 +190,7 @@ function renderTeamTab(sheet, view) {
   const lists = view.current.lists;
   const oppTable = (title, col, columns, opps, middle) => ({ title: `${title} (${opps.length})`, col, columns, rows: opps.map(o => oppRow(o, middle)) });
   row = writeTables(sheet, row, [
-    { title: `Top ${TOP_N} Deals Won ${view.quarter} (${view.current.wonCount} Closed Won, ${formatMoney(view.current.wonArr)} Delta ARR)`,
+    { title: dealsWonTitle(view.quarter, lists.dealsWon, view.current.wonCount, view.current.wonArr),
       col: 2, columns: OPP_COLUMNS, rows: lists.dealsWon.map(o => oppRow(o, x => x.type)) },
     oppTable('Logos Won', 9, OPP_COLUMNS, lists.logosWon, o => o.type),
   ]) + 1;
@@ -228,9 +232,25 @@ function renderTeamTab(sheet, view) {
     renewalsDue(`Renewals due Q+1 ${q1.quarter}`, 2, q1),
     renewalsDue(`Renewals due Q+2 ${q2.quarter}`, 9, q2),
   ]) + 1;
+  const predictedChurn = (title, col, f) => ({
+    title: `${title} (${f.predictedChurn.length}, ${formatMoney(f.forecastChurnArr)} expected)`, col, columns: RENEWAL_DUE_COLUMNS,
+    rows: f.predictedChurn.map(o => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), o.closeDate || '', o.accountArr, o.expectedDeltaArr, o.owner || '']),
+  });
+  row = writeTables(sheet, row, [
+    predictedChurn(`Predicted Churn Q+1 ${q1.quarter}`, 2, q1),
+    predictedChurn(`Predicted Churn Q+2 ${q2.quarter}`, 9, q2),
+  ]) + 1;
 
   row = writeSection(sheet, row, 'PARTNER CONTRIBUTION', `Opportunities in the ${PARTNER_GROUP} group for this team`);
   row = writeBlock(sheet, row, 2, trendHeader('Metric'), PARTNER_ROWS, [view.current], previous, sparklines) + 1;
+
+  const reps = view.reps || [];
+  row = writeSection(sheet, row, 'REP ACTIVITY & PERFORMANCE', `Global GTM Dashboard > Majors Rep Performance measures for the team's reps: FY${parseQuarter(view.quarter).fy} attainment by opp owner, activity = Gong-synced, last ${REP_ACTIVITY_DAYS} days`);
+  row = writeTables(sheet, row, [
+    { title: `Reps (${reps.length})`, col: 2, width: LAST_COL - 1, columns: REP_COLUMNS,
+      rows: reps.map(r => [link(r.name, r.url), r.monthsInSeat, r.accountsOwned, r.repGoal, r.fyWonArr, r.attainmentPct, r.coveragePct,
+        r.meetings30d, r.activities30d, r.activityCoveragePct, r.pipelineCreatedArr, r.stalledArr, r.renewalRiskPct]) },
+  ]) + 1;
 
   row = writeSection(sheet, row, 'OWNERS & DATA QUALITY', `${view.quarter} by opportunity owner; Salesforce hygiene across ${view.quarter}, ${q1.quarter} and ${q2.quarter}`);
   const owners = view.owners || [];
@@ -431,23 +451,31 @@ function addRag(sheet, range, mode) {
 }
 
 const link = (text, url) => ({ text: text || '-', url: url || '' });
+// The table lists the TOP_N largest wins; when there are more, the title says how much of the quarter's wins it shows.
+function dealsWonTitle(quarter, shown, wonCount, wonArr) {
+  const shownArr = sum(shown, 'deltaArr');
+  return wonCount > shown.length
+    ? `Top ${TOP_N} Deals Won ${quarter} (${shown.length} of ${wonCount} Closed Won shown: ${formatMoney(shownArr)} of ${formatMoney(wonArr)} Delta ARR)`
+    : `Top ${TOP_N} Deals Won ${quarter} (${wonCount} Closed Won, ${formatMoney(wonArr)} Delta ARR)`;
+}
 // Opportunity names are long; the cell just says "Link" and points at the opportunity record.
 const oppRow = (o, middle) => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), middle(o) || '', o.closeDate || '', o.deltaArr, o.owner || ''];
 
-// Side-by-side tables ({ title, col, columns, rows }), TABLE_WIDTH columns wide: title row, header row, one row per
+// Side-by-side tables ({ title, col, columns, rows, width? }), DEFAULT_TABLE_WIDTH columns wide unless `width` is given: title row, header row, one row per
 // item (or a single "-" row). Link cells become Salesforce hyperlinks. Returns the row after the tallest table.
 function writeTables(sheet, row, tables) {
   const height = Math.max(1, ...tables.map(t => t.rows.length));
   ensureRows(sheet, row + 2 + height);
-  tables.forEach(({ title, col, columns, rows }) => {
-    sheet.getRange(row, col, 1, TABLE_WIDTH).merge().setValue(title).setFontWeight('bold').setFontColor(COLORS.ink).setFontSize(9)
+  tables.forEach(({ title, col, columns, rows, width }) => {
+    const tableWidth = width || DEFAULT_TABLE_WIDTH;
+    sheet.getRange(row, col, 1, tableWidth).merge().setValue(title).setFontWeight('bold').setFontColor(COLORS.ink).setFontSize(9)
       .setBackground(COLORS.card).setVerticalAlignment('middle')
       .setBorder(null, null, true, null, false, false, COLORS.ink, SpreadsheetApp.BorderStyle.SOLID);
     sheet.setRowHeight(row, 24);
-    sheet.getRange(row + 1, col, 1, TABLE_WIDTH).setBackground(COLORS.card).setFontColor(COLORS.muted).setFontSize(8).setVerticalAlignment('middle');
+    sheet.getRange(row + 1, col, 1, tableWidth).setBackground(COLORS.card).setFontColor(COLORS.muted).setFontSize(8).setVerticalAlignment('middle');
     sheet.getRange(row + 1, col, 1, columns.length).setValues([columns.map(([header]) => header)])
       .setBorder(null, null, true, null, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
-    sheet.getRange(row + 2, col, height, TABLE_WIDTH).setBackground(COLORS.card).setVerticalAlignment('middle');
+    sheet.getRange(row + 2, col, height, tableWidth).setBackground(COLORS.card).setVerticalAlignment('middle');
     if (rows.length) {
       const plain = rows.map(r => r.map(v => (v && typeof v === 'object' ? v.text : v == null ? '' : v)));
       sheet.getRange(row + 2, col, rows.length, columns.length).setValues(plain)
@@ -464,7 +492,7 @@ function writeTables(sheet, row, tables) {
       if (kind === 'link') cells.setRichTextValues(rows.map(r => [linkValue(r[i])]));
       if (kind === 'text' || kind === 'link') cells.setWrap(true);
     });
-    sheet.getRange(row, col, height + 2, TABLE_WIDTH).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
+    sheet.getRange(row, col, height + 2, tableWidth).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
   });
   return row + 2 + height;
 }
