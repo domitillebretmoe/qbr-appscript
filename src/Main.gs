@@ -100,8 +100,10 @@ function refreshTab(sheet) {
   if (!rollupMembers(team)) assertSpecificTeam(team);
   parseQuarter(quarter);
   const view = buildView(team, quarter);
-  renderTeamTab(sheet, view);
+  // Raw Data and Goals first: the tab's metric formulas read them.
   writeRawData(team, view.opps);
+  writeGoals(team, view.goals);
+  renderTeamTab(sheet, view);
 }
 
 // Installable trigger target: re-renders a team tab when B1 or B2 changes (including a paste over B1:B2).

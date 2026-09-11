@@ -63,6 +63,7 @@ class FakeSheet {
   setRowHeight(r, h) { this.rowHeights[r] = h; return this; }
   setColumnWidth(c, w) { this.colWidths[c] = w; return this; }
   setColumnWidths(c, n, w) { for (let i = 0; i < n; i++) this.colWidths[c + i] = w; return this; }
+  autoResizeColumns() { return this; }
   setFrozenRows(n) { this.frozenRows = n; }
   setFrozenColumns(n) { this.frozenColumns = n; }
   setHiddenGridlines(v) { this.hiddenGridlines = v; }

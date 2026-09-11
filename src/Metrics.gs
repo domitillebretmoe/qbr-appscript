@@ -239,7 +239,7 @@ function composeView({ team, members, quarter, opps, accounts, goals, ledgers, u
   const future1 = forecastMetrics(opps, next1, current.endingArr, goalFor(next1), accounts);
   const future2 = forecastMetrics(opps, next2, future1.forecastEndingArr, goalFor(next2), accounts);
   return {
-    team, members, quarter, trend, current, future: [future1, future2], opps, today,
+    team, members, quarter, trend, current, future: [future1, future2], opps, goals, today,
     reps: reps || [],
     owners: ownerMetrics(opps, quarter, next1),
     dataQuality: dataQualityIssues(opps, unassignedAccounts, [quarter, next1, next2], today),

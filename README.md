@@ -52,6 +52,10 @@ quarter = `FiscalYear` / `FiscalQuarter` (FY26 Q1 starts 1 Feb 2026), Major = `A
   Salesforce record; `Raw Data` carries the URLs as columns.
 - **Europe** tab = roll-up of `Europe - Nordics/Benelux/UKI/DACH/South` (`ROLLUP_TEAMS`): opportunities keep their sub-team,
   goals and ledger rows are summed. `Europe` itself is never a Salesforce team.
+- **Formula cells**: dollar / count metrics in the metric blocks and the KPI cards are live `SUMIFS` / `COUNTIFS` over
+  `Raw Data` keyed on `B1` and the quarter, goals from the `Goals` tab, Starting / Ending ARR from `ARR Ledger`, ratios from
+  the neighbouring cells (`Formulas.gs`). Click any metric to see which rows it adds up. Text rows, account counts,
+  quarter elapsed, tables and charts are values written on refresh.
 - **Quarter default**: new tabs open on the fiscal quarter containing today; a tab that already has a valid quarter in `B2` keeps it.
   **QBR → Point all team tabs at the current quarter** moves every tab's `B2` to today's quarter and refreshes.
 

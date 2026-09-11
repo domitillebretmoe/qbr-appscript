@@ -17,6 +17,9 @@ function definitionRows() {
     ['Scope', 'Roll-up tab', `${Object.keys(ROLLUP_TEAMS).map(t => `"${t}" = ${ROLLUP_TEAMS[t].join(' + ')}`).join('; ')}. Opportunities stay attributed to their specific team; the roll-up sums the members' opportunities, accounts, goals and ARR Ledger rows.`, '-'],
     ['Scope', 'Links', 'Every account / opportunity name in the tables links to its Salesforce record (Lightning URL). Raw Data has the URLs as columns.', 'Opportunity.Id, AccountId'],
 
+    ['Scope', 'Formula cells',
+      'Dollar and count metrics in the metric blocks and the KPI cards are live formulas: SUMIFS / COUNTIFS over Raw Data keyed on B1 (Tab) and the quarter (B2, or the Q+1 / Q+2 label), Revenue / Logo Goal from the Goals tab, Starting / Ending ARR from the ARR Ledger, ratios from the cells next to them. Click a cell to see exactly which rows it adds up. Account counts, quarter elapsed, text rows, tables and charts are values written on refresh.',
+      'Raw Data, Goals and ARR Ledger tabs'],
     ['Scope', 'Forecast vs actuals', 'The banner and the quarter block are labelled FORECAST while the selected quarter is in progress (its numbers are closed deals to date plus, where stated, open opportunities) and ACTUALS once the quarter has ended.', 'Refresh date vs quarter end'],
 
     ['Quarter actuals', 'Revenue Goal', 'Sum of Goal Value of "Net ARR" goals whose Period Start falls in the quarter, over every Salesforce team matching B1.', 'Goal__c: Goal_Type__c = "Net ARR", Value__c, Period_Start__c, Team2__c'],
@@ -96,6 +99,7 @@ function definitionRows() {
     ['ARR Ledger', 'Rows', 'One row per team and quarter: Starting ARR, Net Added ARR, Ending ARR, Source. Starting = previous quarter\'s Ending; Ending = Starting + Net Added.', 'ARR Ledger tab'],
     ['ARR Ledger', 'Source', `"${SEED_SOURCE}" rows (Q1-2026, Q2-2026) are fixed values from last quarter's workbook. Rows stamped "Salesforce <date>" are recomputed on every refresh. Any other text (e.g. "Locked") freezes the row as typed.`, '-'],
     ['ARR Ledger', 'Roll-up tabs', 'A roll-up tab (e.g. Europe) has no ledger rows: its Starting / Ending ARR is the sum of its member teams\' rows for the quarter.', '-'],
+    ['Goals', 'Rows', 'One row per tab and fiscal quarter with the Net ARR Goal and New Logo Goal summed over the Salesforce teams matching the tab (a roll-up tab sums its members). Refreshing a tab replaces that tab\'s rows.', 'Goal__c'],
     ['Raw Data', 'Rows', 'Every Salesforce opportunity fetched for a team tab (all fiscal quarters from Q1-2026 to Q+2), one row each, with the Bucket it is counted in: Closed Won - Land/Expand, Won renewal, Won renewal - downgrade, Full churn, Lost pipeline, Open pipeline. Filter on Tab + Quarter to tie a metric out. Refreshing a tab replaces that tab\'s rows.', 'Raw Data tab'],
   ];
 }
