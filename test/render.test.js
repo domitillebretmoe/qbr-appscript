@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const { FakeSheet, globals } = require('./fake-sheets');
+const { makeEvaluator } = require('./formula-eval');
 const { opp, dach, account, dachAccounts, SF, accountUrl } = require('./fixtures');
 
 // Illustrative Q3/Q4-2026 activity layered on the real DACH fixture so the .xlsx preview shows a populated tab.
@@ -27,12 +28,19 @@ const previewAccounts = dachAccounts.concat([
   account('Bosch', 0, true), account('Deutsche Bank', 0, true, { hasOpenOpp: true }),
 ]);
 
-const ctx = vm.createContext(globals());
-['Config.gs', 'Metrics.gs', 'Render.gs', 'RawData.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
+// The workbook the formulas read: Raw Data / Goals / ARR Ledger are rebuilt by render().
+let workbook = {};
+const env = globals();
+env.SpreadsheetApp.getActive = () => ({
+  getSheetByName: name => workbook[name] || null,
+  insertSheet: name => (workbook[name] = new FakeSheet(name)),
+});
+const ctx = vm.createContext(env);
+['Config.gs', 'Metrics.gs', 'Reps.gs', 'Ledger.gs', 'Formulas.gs', 'Render.gs', 'RawData.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 
 // buildView() from Main.gs without Salesforce: the ledger is the seeded DACH values rolled forward with Net Added ARR.
 const TODAY = '2026-09-15';
-function sampleView(quarter = 'Q2-2026', opps = dach, accounts = dachAccounts, unassignedAccounts = []) {
+function sampleView(quarter = 'Q2-2026', opps = dach, accounts = dachAccounts, unassignedAccounts = [], reps = []) {
   const goals = {
     'Q1-2026': { revenue: 2000000, logos: 0 }, 'Q2-2026': { revenue: 6700000, logos: 1 }, 'Q3-2026': { revenue: 7500000, logos: 2 },
     'Q4-2026': { revenue: 8000000, logos: 2 }, 'Q1-2027': { revenue: 8500000, logos: 3 },
@@ -43,12 +51,25 @@ function sampleView(quarter = 'Q2-2026', opps = dach, accounts = dachAccounts, u
     const prevEnding = ledger[ctx.shiftQuarter(q, -1)] ? ledger[ctx.shiftQuarter(q, -1)].endingArr : null;
     ledger[q] = ledger[q] || { startingArr: prevEnding, endingArr: prevEnding + ctx.quarterMetrics(opps, q, {}).netAddedArr };
   });
-  return ctx.composeView({ team: 'Europe - DACH', members: ['Europe - DACH'], quarter, opps, accounts, goals, ledgers: [ledger], unassignedAccounts, today: TODAY });
+  return ctx.composeView({ team: 'Europe - DACH', members: ['Europe - DACH'], quarter, opps, accounts, goals, ledgers: [ledger], unassignedAccounts, reps, today: TODAY });
 }
 
-function render(view) {
+// Mirrors refreshTab(): Raw Data, Goals and the ARR Ledger rows first, then the tab. `sheet.evaluate(formula)`
+// computes a formula against the workbook and `sheet.valueAt(r, c)` the evaluated cell.
+function render(view, ledgerTeam = view.team) {
+  workbook = {};
   const sheet = new FakeSheet(view.team);
+  workbook[view.team] = sheet;
+  ctx.writeRawData(view.team, view.opps);
+  ctx.writeGoals(view.team, view.goals);
+  const ledger = ctx.ledgerSheet();
+  const seeded = ledger.getLastRow();
+  const rows = view.trend.filter(m => !['Q1-2026', 'Q2-2026'].includes(m.quarter)) // seeded by ledgerSheet()
+    .map(m => [ledgerTeam, m.quarter, m.startingArr, m.netAddedArr, m.endingArr, 'test']);
+  if (rows.length) ledger.getRange(seeded + 1, 1, rows.length, rows[0].length).setValues(rows);
   ctx.renderTeamTab(sheet, view);
+  sheet.evaluate = makeEvaluator(workbook, sheet);
+  sheet.valueAt = (r, c) => sheet.evaluate(sheet.cell(r, c).value);
   return sheet;
 }
 
@@ -57,21 +78,27 @@ test('team tab renders every block, six KPI cards and six charts', () => {
   const values = Object.values(sheet.cells).map(c => c.value);
   assert.equal(sheet.cell(1, 2).value, 'Europe - DACH');
   assert.equal(sheet.cell(2, 2).value, 'Q2-2026');
-  assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q2-2026 QBR');
+  assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q2-2026 QBR - ACTUALS (quarter closed)');
   ['Net Added ARR', 'Starting ARR', 'Forecast Ending ARR', '# Active Customers', 'Top 3 Churns'].forEach(label => assert.ok(values.includes(label), label));
-  ['PREVIOUS QUARTER', 'FUTURE QUARTER(S)', 'PARTNER CONTRIBUTION', 'CHARTS'].forEach(label => assert.ok(values.includes(label), label));
+  ['ACTUALS QUARTER', 'FUTURE QUARTER(S)', 'PARTNER CONTRIBUTION', 'CHARTS'].forEach(label => assert.ok(values.includes(label), label));
   assert.equal(sheet.charts.length, 6);
   assert.equal(sheet.frozenRows, 3);
   assert.ok(sheet.getMaxColumns() >= 20 + vm.runInContext('TREND_KEYS', ctx).length, 'sheet widened for the data area');
   // KPI cards: label row 5, value row 6, QoQ row 7.
   assert.equal(sheet.cell(5, 2).value, 'NET ADDED ARR');
-  assert.equal(sheet.cell(6, 2).value, -66000);
+  // KPI cards point at the metric block cells, which are formulas over Raw Data / ARR Ledger.
+  assert.match(String(sheet.cell(6, 2).value), /^=[A-Z]+\d+$/);
+  assert.equal(sheet.valueAt(6, 2), -66000);
   assert.match(String(sheet.cell(7, 2).value), /QoQ$/);
   // Values stay exact dollars and the ARR bridge ties.
   const at = label => Object.values(sheet.cells).find(c => c.value === label && c.col === 7);
-  const val = label => sheet.cell(at(label).row, 8).value;
+  const val = label => sheet.valueAt(at(label).row, 8);
+  assert.match(String(sheet.cell(at('Full Churn $').row, 8).value), /^=SUMIFS\('Raw Data'!/);
+  assert.match(String(sheet.cell(at('Starting ARR').row, 8).value), /^=SUMIFS\('ARR Ledger'!/);
   assert.equal(val('Ending ARR'), 14040851.2);
   assert.equal(val('Starting ARR') + val('Added ARR') + val('Downgrade $') + val('Full Churn $'), val('Ending ARR'));
+  // The "% of Starting" column divides the bridge cell by the Starting ARR cell.
+  assert.equal(sheet.valueAt(at('Ending ARR').row, 9), 14040851.2 / val('Starting ARR'));
 });
 
 const cellsWhere = (sheet, pred) => Object.values(sheet.cells).filter(pred);
@@ -92,7 +119,7 @@ function tableRows(sheet, prefix) {
 test('linked tables: churn vs lost pipeline, renewals, top customers, top deals, every name links to Salesforce', () => {
   const sheet = render(sampleView('Q3-2026'));
 
-  const logos = tableRows(sheet, 'Logos Won');
+  const logos = tableRows(sheet, 'Logos Won (1)');
   assert.equal(logos.title, 'Logos Won (1)');
   assert.deepEqual(logos.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
   assert.equal(logos.rows[0][0].value, 'Zalando');
@@ -125,7 +152,7 @@ test('linked tables: churn vs lost pipeline, renewals, top customers, top deals,
   assert.equal(tableRows(sheet, 'Renewals Lost').rows[0][0].value, 'Bolt');
   // Renewal rate on the tab = won / (won + lost) from those same two tables.
   assert.equal(sheet.cell(5, 9).value, 'RENEWAL RATE');
-  assert.equal(sheet.cell(6, 9).value, 2 / 3);
+  assert.equal(sheet.valueAt(6, 9), 2 / 3);
 
   const majors = tableRows(sheet, 'Top 10 Major Customers');
   assert.equal(majors.title, 'Top 10 Major Customers (3 of 3 active)');
@@ -190,7 +217,7 @@ test('every chart reads one contiguous block whose header row and data rows are 
   assert.deepEqual(trendChart.ranges[0].values.slice(1).map(r => r[0]), ['Q1-2026', 'Q2-2026', 'Q3-2026']);
   const arr = sheet.charts[5].ranges[0].values;
   assert.equal(sheet.cell(5, 7).value, 'ENDING ARR');
-  assert.equal(arr[arr.length - 1][1], sheet.cell(6, 7).value, 'Ending ARR chart ends on the KPI card value');
+  assert.equal(arr[arr.length - 1][1], sheet.valueAt(6, 7), 'Ending ARR chart ends on the KPI card value');
 });
 
 test('batch 2 sections: GRR/NRR, pace, coverage, renewals due, owners, data quality, hover notes, PDF link', () => {
@@ -198,26 +225,28 @@ test('batch 2 sections: GRR/NRR, pace, coverage, renewals due, owners, data qual
   const view = sampleView('Q3-2026', dach, dachAccounts, [flutter]);
   const sheet = render(view);
   const labelled = (label, col) => { const c = cellsWhere(sheet, x => x.value === label && x.col === col)[0]; assert.ok(c, label); return c; };
-  const valueOf = (label, col) => sheet.cell(labelled(label, col).row, col + 1);
+  const valueOf = (label, col) => Object.assign(sheet.cell(labelled(label, col).row, col + 1), { evaluated: sheet.valueAt(labelled(label, col).row, col + 1) });
 
   // PREVIOUS QUARTER: elapsed, pace, open pipeline, coverage (as a multiple) with hover notes on the labels.
-  assert.equal(valueOf('Quarter elapsed (%)', 2).value, 45 / 92);
-  assert.equal(valueOf('Pace (attainment / elapsed)', 2).value, view.current.pace);
-  assert.equal(valueOf('Open pipeline (this quarter)', 2).value, 400000);
+  assert.equal(valueOf('Quarter elapsed (%)', 2).value, 45 / 92, 'elapsed has no sheet source: a value');
+  assert.match(valueOf('Pace (attainment / elapsed)', 2).value, /^=IF\(OR\(/);
+  assert.equal(valueOf('Pace (attainment / elapsed)', 2).evaluated, view.current.pace);
+  assert.equal(valueOf('Open pipeline (this quarter)', 2).evaluated, 400000);
   const coverage = valueOf('Pipeline coverage of remaining goal', 2);
-  assert.equal(coverage.value, 400000 / 7506000);
+  assert.equal(coverage.evaluated, 400000 / 7506000);
   assert.equal(coverage.numberFormat, '0.0"x"');
   assert.match(labelled('Pace (attainment / elapsed)', 2).note, /Attainment \/ Quarter elapsed/);
   assert.match(labelled('GRR (%)', 7).note, /Gross revenue retention/);
   assert.match(sheet.cell(5, 2).note, /Closed Won/, 'KPI card label carries a note');
   // ARR bridge: GRR / NRR in dollars of Starting ARR.
-  assert.equal(valueOf('GRR (%)', 7).value, view.current.grr);
-  assert.equal(valueOf('NRR (%)', 7).value, view.current.nrr);
+  assert.equal(valueOf('GRR (%)', 7).evaluated, view.current.grr);
+  assert.equal(valueOf('NRR (%)', 7).evaluated, view.current.nrr);
   assert.ok(view.current.grr < 1 && view.current.nrr > view.current.grr);
 
   // FUTURE: renewals due with the account ARR at stake, each row linked.
-  assert.equal(valueOf('# Renewals due', 2).value, 1);
-  assert.equal(valueOf('ARR up for renewal', 2).value, 410000);
+  assert.equal(valueOf('# Renewals due', 2).evaluated, 1);
+  assert.match(valueOf('# Renewals due', 2).value, /COUNTIFS\('Raw Data'!.*"Q4-2026"/, 'Q+1 formulas key on the quarter label');
+  assert.equal(valueOf('ARR up for renewal', 2).value, 410000, 'account ARR at stake is not a Raw Data column: a value');
   const due = tableRows(sheet, 'Renewals due Q+1 Q4-2026');
   assert.equal(due.title, 'Renewals due Q+1 Q4-2026 (1, $410K up for renewal)');
   assert.deepEqual(due.headers, ['Account', 'Opportunity', 'Close date', 'Current ARR', 'Expected Delta ARR', 'Owner']);
@@ -261,11 +290,11 @@ test('attainment cells get red/amber/green rules; sparklines only appear once fo
   const rag = sheet.rules.filter(r => r.when);
   // KPI card (font) + Attainment (%) + Pace + Logo Attainment (%) + Net Forecast (%) = 5 ranges x 3 thresholds.
   assert.equal(rag.length, 15);
-  assert.deepEqual(rag.slice(0, 3).map(r => r.when), [{ gte: 1 }, { between: [0.7, 0.9999] }, { lt: 0.7 }]);
-  assert.ok(rag.slice(0, 3).every(r => r.fontColor && !r.background), 'card value coloured by font');
-  assert.ok(rag.slice(3).every(r => r.background && !r.fontColor), 'table cells coloured by background');
+  const card = rag.filter(r => r.ranges.includes('E6:F6'));
+  assert.deepEqual(card.map(r => r.when), [{ gte: 1 }, { between: [0.7, 0.9999] }, { lt: 0.7 }], 'rules cover the Attainment card');
+  assert.ok(card.every(r => r.fontColor && !r.background), 'card value coloured by font');
+  assert.ok(rag.filter(r => !card.includes(r)).every(r => r.background && !r.fontColor), 'table cells coloured by background');
   assert.equal(sheet.cell(5, 5).value, 'ATTAINMENT');
-  assert.ok(rag[0].ranges.includes('E6:F6'), `rules cover the Attainment card, got ${rag[0].ranges}`);
   // Three quarters: no Trend column (sparklines are noise), so the PREVIOUS QUARTER table is 3 wide.
   const header = cellsWhere(sheet, c => c.value === 'Metric')[0];
   assert.equal(sheet.cell(header.row, header.col + 2).value, 'QoQ');
@@ -299,7 +328,166 @@ test('Europe roll-up banner names its members', () => {
   const view = Object.assign(sampleView('Q3-2026'), { team: 'Europe', members: ['Europe - Nordics', 'Europe - Benelux', 'Europe - UKI', 'Europe - DACH', 'Europe - South'] });
   const sheet = render(view);
   assert.equal(sheet.cell(1, 2).value, 'Europe');
-  assert.equal(sheet.cell(3, 2).value, 'Europe   Q3-2026 QBR   (roll-up of Nordics, Benelux, UKI, DACH, South)');
+  assert.equal(sheet.cell(3, 2).value, 'Europe   Q3-2026 QBR - FORECAST (quarter in progress, 49% elapsed)   (roll-up of Nordics, Benelux, UKI, DACH, South)');
+});
+
+// Every formula-backed metric cell evaluates to the number the metrics code computed, for the selected quarter
+// (keyed on $B$1 / $B$2), Q+1 / Q+2 (quarter literals, Starting ARR chained from the previous column) and the partner
+// block; for a plain team and for the Europe roll-up (Raw Data rows carry the tab, the ledger is summed over members).
+function checkFormulas(view, ledgerTeam) {
+  const sheet = render(view, ledgerTeam);
+  const spec = name => vm.runInContext(name, ctx);
+  const formulaKeys = Object.keys(vm.runInContext('METRIC_FORMULAS', ctx));
+  const sectionRow = title => cellsWhere(sheet, c => c.value === title)[0].row;
+  const blocks = [
+    // [section title, label column, block spec, metrics per value column]
+    ['FUTURE QUARTER(S)', 2, spec('PREVIOUS_ROWS'), [view.current]],
+    ['FUTURE QUARTER(S)', 7, spec('ARR_ROWS'), [view.current]],
+    ['FUTURE QUARTER(S)', 11, spec('ACCOUNT_ROWS'), [view.current]],
+    ['PARTNER CONTRIBUTION', 2, spec('FUTURE_ROWS'), view.future],
+    ['PARTNER CONTRIBUTION', 7, spec('FUTURE_ARR_ROWS'), view.future],
+    ['CHARTS', 2, spec('PARTNER_ROWS'), [view.current]],
+  ];
+  let formulas = 0;
+  blocks.forEach(([endTitle, col, rows, columns]) => {
+    const end = sectionRow(endTitle);
+    const startTitle = { 'FUTURE QUARTER(S)': /QUARTER$/, 'PARTNER CONTRIBUTION': /^FUTURE QUARTER/, CHARTS: /^PARTNER CONTRIBUTION/ }[endTitle];
+    const start = cellsWhere(sheet, c => typeof c.value === 'string' && startTitle.test(c.value) && c.col === 2)[0].row;
+    rows.forEach(([label, kind, key]) => {
+      if (kind === 'text' || !formulaKeys.includes(key)) return;
+      const labelCell = cellsWhere(sheet, c => c.value === label && c.col === col && c.row > start && c.row < end)[0];
+      assert.ok(labelCell, `${label} in column ${col}`);
+      columns.forEach((metrics, j) => {
+        const cell = sheet.cell(labelCell.row, col + 1 + j);
+        assert.match(String(cell.value), /^=/, `${label} [${j}] is a formula`);
+        const expected = metrics[key] == null ? '' : metrics[key];
+        const got = sheet.evaluate(cell.value);
+        if (typeof expected === 'number') assert.ok(Math.abs(got - expected) < 1e-6, `${label} [${j}]: ${cell.value} -> ${got}, computed ${expected}`);
+        else assert.equal(got, expected, `${label} [${j}]: ${cell.value}`);
+        formulas++;
+      });
+    });
+  });
+  return { sheet, formulas };
+}
+
+test('every formula cell reproduces the computed metric (current, Q+1/Q+2, partner blocks)', () => {
+  const view = sampleView('Q3-2026', previewOpps, previewAccounts);
+  const { sheet, formulas } = checkFormulas(view);
+  assert.ok(formulas >= 55, `${formulas} formula cells checked`);
+  // Selected-quarter formulas key on the B1 / B2 selectors, so changing B2 re-points every metric without a refresh.
+  const netAdded = cellsWhere(sheet, c => c.value === 'Net Added ARR' && c.col === 2)[0];
+  const formula = sheet.cell(netAdded.row, 3).value;
+  assert.match(formula, /'Raw Data'!A:A,\$B\$1,'Raw Data'!C:C,\$B\$2/);
+  sheet.cell(2, 2).value = 'Q2-2026';
+  assert.equal(sheet.evaluate(formula), sampleView('Q2-2026', previewOpps, previewAccounts).current.netAddedArr);
+  sheet.cell(2, 2).value = 'Q3-2026';
+  // Q+1 Starting ARR is the current quarter's Ending ARR cell; Q+2 starts from Q+1's Forecast Ending ARR cell.
+  const start = cellsWhere(sheet, c => c.value === 'Starting ARR' && c.col === 7)[1];
+  assert.match(String(sheet.cell(start.row, 8).value), /^=SUMIFS\('ARR Ledger'!E:E/);
+  assert.match(String(sheet.cell(start.row, 9).value), /^=[A-Z]+\d+$/);
+  assert.equal(sheet.valueAt(start.row, 9), view.future[0].forecastEndingArr);
+  // KPI cards reference the block cells.
+  for (let col = 2; col <= 14; col += 2) assert.match(String(sheet.cell(6, col).value), /^=[A-Z]+\d+$/, `KPI card ${col}`);
+  assert.equal(sheet.valueAt(6, 5), view.current.attainment);
+  assert.equal(sheet.valueAt(6, 7), view.current.endingArr);
+});
+
+test('Europe roll-up formulas sum the member teams in the ledger and read the roll-up rows of Raw Data / Goals', () => {
+  const members = ['Europe - Nordics', 'Europe - Benelux', 'Europe - UKI', 'Europe - DACH', 'Europe - South'];
+  const view = Object.assign(sampleView('Q3-2026', previewOpps, previewAccounts), { team: 'Europe', members });
+  const { sheet, formulas } = checkFormulas(view, 'Europe - DACH');
+  assert.ok(formulas >= 55);
+  const start = cellsWhere(sheet, c => c.value === 'Starting ARR' && c.col === 7)[0];
+  const formula = String(sheet.cell(start.row, 8).value);
+  members.forEach(m => assert.ok(formula.includes(`"${m}"`) || (m === 'Europe' && formula.includes('$B$1')), `ledger formula sums ${m}`));
+  assert.equal((formula.match(/SUMIFS/g) || []).length, 5);
+  assert.equal(sheet.evaluate(formula), view.current.startingArr);
+});
+
+test('an open quarter is labelled FORECAST and separates expected logos from logos actually won', () => {
+  const sheet = render(sampleView('Q3-2026'));
+  const values = Object.values(sheet.cells).map(c => c.value);
+  assert.ok(values.includes('FORECAST QUARTER'));
+  assert.ok(!values.includes('ACTUALS QUARTER'));
+  const metric = label => {
+    const cell = cellsWhere(sheet, c => c.value === label)[0];
+    return sheet.cell(cell.row, cell.col + 1).value;
+  };
+  // Helaba (Major) open Expand at 0.5 expected logo impact; Zalando's Land is won but not a Major.
+  assert.equal(sheet.evaluate(metric('Logo Attainment (expected, incl. open opps)')), 0.5);
+  assert.equal(sheet.evaluate(metric('Logos Won (Closed Won Land, Majors)')), 0);
+  assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q3-2026 QBR - FORECAST (quarter in progress, 49% elapsed)');
+
+  const closed = render(sampleView('Q2-2026'));
+  const q2 = label => { const cell = cellsWhere(closed, c => c.value === label)[0]; return closed.valueAt(cell.row, cell.col + 1); };
+  assert.equal(q2('Logo Attainment (expected, incl. open opps)'), 0, 'Helaba won (+1) nets against Deutsche Telekom churn (-1)');
+  assert.equal(q2('Logos Won (Closed Won Land, Majors)'), 1);
+});
+
+test('Top 10 Deals Won lists the quarter\'s Closed Won opps with links and ties out to Net Added ARR', () => {
+  const sheet = render(sampleView('Q3-2026'));
+  const deals = tableRows(sheet, 'Top 10 Deals Won Q3-2026');
+  assert.equal(deals.title, 'Top 10 Deals Won Q3-2026 (3 Closed Won, $78K Delta ARR)');
+  assert.deepEqual(deals.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
+  assert.deepEqual(deals.rows.map(r => r[0].value), ['Zalando', 'CompuGroup', 'Julius Baer']);
+  assert.deepEqual(deals.rows.map(r => r[2].value), ['Land', 'Renewal', 'Renewal']);
+  assert.deepEqual(deals.rows.map(r => r[4].value), [96000, 12000, -30000]);
+  deals.rows.forEach(r => {
+    assert.match(r[0].link, /\/lightning\/r\/Account\//);
+    assert.equal(r[1].value, 'Link');
+    assert.match(r[1].link, /\/lightning\/r\/Opportunity\//);
+  });
+  // Closed Won 78,000 + full churn (Bolt -84,000) = Net Added ARR.
+  assert.equal(sheet.cell(5, 2).value, 'NET ADDED ARR');
+  assert.equal(sheet.valueAt(6, 2), 78000 - 84000);
+});
+
+test('with more than ten wins the Top 10 Deals Won title says how much of the quarter it shows', () => {
+  const wins = Array.from({ length: 12 }, (_, i) => opp('Q3-2026', 'Closed Won', `Win ${i + 1}`, 'Expand', 'Enterprise', (i + 1) * 1000, 0));
+  const sheet = render(sampleView('Q3-2026', dach.concat(wins)));
+  const deals = tableRows(sheet, 'Top 10 Deals Won Q3-2026');
+  // 15 wins: fixture 78,000 (incl. Julius Baer -30,000) + 1,000..12,000 = 156,000; the ten largest = 96 + 12 + 12 + 11 + ... + 5 thousand = 176,000.
+  assert.equal(deals.title, 'Top 10 Deals Won Q3-2026 (10 of 15 Closed Won shown: $176K of $156K Delta ARR)');
+  assert.equal(deals.rows.length, 10);
+  assert.equal(deals.rows[0][0].value, 'Zalando');
+  assert.equal(deals.rows[9][0].value, 'Win 5');
+});
+
+test('future quarters get Predicted Churn tables next to Renewals due', () => {
+  const sheet = render(sampleView('Q3-2026'));
+  const q1 = tableRows(sheet, 'Predicted Churn Q+1 Q4-2026');
+  assert.equal(q1.title, 'Predicted Churn Q+1 Q4-2026 (1, -$30K expected)');
+  assert.deepEqual(q1.headers, ['Account', 'Opportunity', 'Close date', 'Current ARR', 'Expected Delta ARR', 'Owner']);
+  assert.equal(q1.rows[0][0].value, 'CompuGroup');
+  assert.equal(q1.rows[0][0].link, accountUrl('CompuGroup'));
+  assert.equal(q1.rows[0][1].value, 'Link');
+  assert.equal(q1.rows[0][3].value, 410000);
+  assert.equal(q1.rows[0][4].value, -30000);
+  const q2 = tableRows(sheet, 'Predicted Churn Q+2 Q1-2027');
+  assert.equal(q2.title, 'Predicted Churn Q+2 Q1-2027 (0, $0 expected)');
+  assert.equal(q2.rows[0][0].value, '-');
+});
+
+test('rep activity & performance table spans the page with one linked row per rep', () => {
+  const rep = (name, over) => Object.assign({ userId: name, name, url: `${SF}/lightning/r/User/${name}/view`, team: 'Europe Majors - DACH', monthsInSeat: 17.5,
+    accountsOwned: 34, repGoal: 25750000, fyWonArr: 3256460, attainmentPct: 3256460 / 25750000, coveragePct: 0.29, meetings30d: 62, activities30d: 197,
+    activityCoveragePct: 4 / 34, pipelineCreatedArr: 615000, stalledArr: 60000, renewalRiskPct: null }, over);
+  const sheet = render(sampleView('Q3-2026', dach, dachAccounts, [], [rep('Anna Berger'), rep('Max Weber', { fyWonArr: 0, attainmentPct: 0, meetings30d: 0 })]));
+  const values = Object.values(sheet.cells).map(c => c.value);
+  assert.ok(values.includes('REP ACTIVITY & PERFORMANCE'));
+  const reps = tableRows(sheet, 'Reps (2)');
+  assert.deepEqual(reps.headers, ['Rep', 'Months in seat', 'Accts owned', 'Rep goal (FY)', 'Won ARR (FY)', 'Attainment', 'Coverage', 'Meetings (30d)',
+    'Activities (30d)', 'Acct coverage (30d)', 'Pipeline created (Q)', 'Stalled >60d', 'Renewal risk']);
+  assert.equal(reps.headers.length, 13, 'B..N');
+  assert.equal(reps.rows[0][0].value, 'Anna Berger');
+  assert.equal(reps.rows[0][0].link, `${SF}/lightning/r/User/Anna Berger/view`);
+  assert.equal(reps.rows[0][4].value, 3256460);
+  assert.equal(reps.rows[0][5].value, 3256460 / 25750000);
+  assert.equal(reps.rows[1][7].value, 0);
+  assert.equal(reps.rows[0][12].value, '');
+  const empty = tableRows(render(sampleView('Q3-2026')), 'Reps (0)');
+  assert.equal(empty.rows[0][0].value, '-');
 });
 
 const RAW_HEADER = vm.runInContext('RAW_HEADER', ctx);

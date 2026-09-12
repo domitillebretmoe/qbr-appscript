@@ -10,6 +10,7 @@ function mainContext(stubs) {
     Utilities: { formatDate: d => d.toISOString().slice(0, 10) },
     Session: { getScriptTimeZone: () => 'UTC' },
     fetchRegionOnlyAccounts: () => [],
+    fetchRepPerformance: () => [],
   }, stubs));
   ['Config.gs', 'Metrics.gs', 'Main.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
   return ctx;

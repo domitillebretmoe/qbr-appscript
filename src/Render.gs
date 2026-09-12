@@ -11,7 +11,7 @@ const MIN_TREND_QUARTERS = 4;
 // Attainment-style percentages get red / amber / green instead of a data bar.
 const RAG_KEYS = ['attainment', 'logoAttainmentPct', 'netForecastPct', 'pace'];
 const RAG = { amber: 0.7, green: 1 };
-const TABLE_WIDTH = 6;
+const DEFAULT_TABLE_WIDTH = 6;
 const NUMERIC_KINDS = ['money', 'pct', 'int', 'mult'];
 // Cognition palette: warm off-white page, near-black ink, electric-blue accent, flat white cards.
 const FONT = 'Inter';
@@ -42,7 +42,8 @@ const PREVIOUS_ROWS = [
   ['Open pipeline (this quarter)', 'money', 'openPipelineArr'],
   ['Pipeline coverage of remaining goal', 'mult', 'pipelineCoverage'],
   ['Logo Goal', 'int', 'logoGoal'],
-  ['Logo Attainment', 'int', 'logoAttainment'],
+  ['Logo Attainment (expected, incl. open opps)', 'int', 'logoAttainment'],
+  ['Logos Won (Closed Won Land, Majors)', 'int', 'logosWonMajors'],
   ['Logo Attainment (%)', 'pct', 'logoAttainmentPct'],
   ['# Renewals', 'int', 'renewals'],
   ['# Won Renewals', 'int', 'wonRenewals'],
@@ -105,6 +106,10 @@ const CUSTOMER_COLUMNS = [['#', 'int'], ['Account', 'link'], ['Team', 'text'], [
 const RENEWAL_DUE_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Close date', 'date'], ['Current ARR', 'money'], ['Expected Delta ARR', 'money'], ['Owner', 'text']];
 const OWNER_COLUMNS = [['Owner', 'text'], ['Net Added ARR', 'money'], ['# Won', 'int'], ['Churn ARR', 'money'], ['Open pipeline (Q)', 'money'], ['Pipeline Q+1', 'money']];
 const QUALITY_COLUMNS = [['Issue', 'text'], ['Account', 'link'], ['Opportunity', 'link'], ['Detail', 'text'], ['Close date', 'date'], ['Owner', 'text']];
+// Full-width rep table (13 columns, B..N), same measures as the Salesforce Majors Rep Performance tab.
+const REP_COLUMNS = [['Rep', 'link'], ['Months in seat', 'mult'], ['Accts owned', 'int'], ['Rep goal (FY)', 'money'], ['Won ARR (FY)', 'money'],
+  ['Attainment', 'pct'], ['Coverage', 'pct'], ['Meetings (30d)', 'int'], ['Activities (30d)', 'int'], ['Acct coverage (30d)', 'pct'],
+  ['Pipeline created (Q)', 'money'], ['Stalled >60d', 'money'], ['Renewal risk', 'pct']];
 
 // Hover note on each metric label (same definitions as the Definitions tab, in one line).
 const KPI_NOTES = {
@@ -116,7 +121,8 @@ const KPI_NOTES = {
   openPipelineArr: 'Delta ARR of open opportunities with a close date in the selected quarter.',
   pipelineCoverage: 'Open pipeline / remaining goal (goal - Net Added ARR); empty once the goal is met. Future quarters: pipeline / goal.',
   logoGoal: 'New Logos goal for the quarter.',
-  logoAttainment: 'Sum of Expected Logo Impact on Major accounts (churned logos count -1).',
+  logoAttainment: 'Sum of Expected Logo Impact of all the quarter\'s opportunities on Major accounts, open ones included (churned logos count -1). A forecast until the quarter closes.',
+  logosWonMajors: 'Number of Closed Won "Land" opportunities on Major accounts: logos actually landed so far this quarter.',
   logoAttainmentPct: 'Logo Attainment / Logo Goal (attainment below 0 counts as 0).',
   renewals: 'Won renewals + full churn (Closed Won + Closed Lost renewal opportunities).',
   wonRenewals: 'Closed Won opportunities of record type Renewal or Fed - Renewal.',
@@ -158,7 +164,7 @@ const KPI_NOTES = {
 };
 
 // Metrics kept per quarter in the data area (drives sparklines and the trend chart).
-const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logoAttainmentPct', 'endingArr',
+const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logosWonMajors', 'logoAttainmentPct', 'endingArr',
   'renewals', 'wonRenewals', 'renewalRate', 'churnArr', 'churnCustomers', 'activeCustomers', 'conversionRate', 'lostPipelineCount',
   'lostPipelineArr', 'partnerNetAddedArr', 'partnerNewLogos', 'partnerChurnArr', 'partnerChurnCustomers', 'grr', 'nrr', 'pace',
   'openPipelineArr', 'pipelineCoverage'];
@@ -171,20 +177,31 @@ function renderTeamTab(sheet, view) {
   const previous = view.trend.length > 1 ? view.trend[view.trend.length - 2] : null;
 
   const members = view.members && view.members.length > 1 ? `   (roll-up of ${view.members.map(teamToken).join(', ')})` : '';
-  writeBanner(sheet, 3, view.team, `${view.quarter} QBR${members}`);
-  let row = writeKpiCards(sheet, 5, view.current, previous) + 1;
+  const status = statusText(view.current);
+  writeBanner(sheet, 3, view.team, `${view.quarter} QBR - ${status}${members}`);
+  // Metric cells are formulas over Raw Data / Goals / ARR Ledger (see Formulas.gs); the KPI cards are written after
+  // the blocks so they can point at the block cells.
+  const memberTeams = view.members || [view.team];
+  const current = formulaContext(view.team, view.quarter, memberTeams, true);
+  const kpiRow = 5;
+  let row = kpiRow + 4;
 
-  row = writeSection(sheet, row, 'PREVIOUS QUARTER', `${view.quarter} actuals vs goal, QoQ vs ${previous ? previous.quarter : 'n/a'}, trend from ${FIRST_QUARTER}`);
+  row = writeSection(sheet, row, `${view.current.status} QUARTER`, `${view.quarter} ${status.toLowerCase()} vs goal, QoQ vs ${previous ? previous.quarter : 'n/a'}, trend from ${FIRST_QUARTER}`);
   row = Math.max(
-    writeBlock(sheet, row, 2, trendHeader('Metric'), PREVIOUS_ROWS, [view.current], previous, sparklines),
-    writeBlock(sheet, row, 7, ['ARR bridge', view.quarter, '% of Starting'], ARR_ROWS, [view.current], null, null, view.current.startingArr),
-    writeBlock(sheet, row, 11, trendHeader('Accounts'), ACCOUNT_ROWS, [view.current], previous, sparklines),
+    writeBlock(sheet, row, 2, trendHeader('Metric'), PREVIOUS_ROWS, [view.current], previous, sparklines, null, [current]),
+    writeBlock(sheet, row, 7, ['ARR bridge', view.quarter, '% of Starting'], ARR_ROWS, [view.current], null, null, view.current.startingArr, [current]),
+    writeBlock(sheet, row, 11, trendHeader('Accounts'), ACCOUNT_ROWS, [view.current], previous, sparklines, null, [current]),
   ) + 1;
+  writeKpiCards(sheet, kpiRow, view.current, previous, current.addr);
   const lists = view.current.lists;
   const oppTable = (title, col, columns, opps, middle) => ({ title: `${title} (${opps.length})`, col, columns, rows: opps.map(o => oppRow(o, middle)) });
   row = writeTables(sheet, row, [
-    oppTable('Logos Won', 2, OPP_COLUMNS, lists.logosWon, o => o.type),
-    oppTable('Lost Pipeline', 9, OPP_COLUMNS, lists.lostPipeline, o => o.type),
+    { title: dealsWonTitle(view.quarter, lists.dealsWon, view.current.wonCount, view.current.wonArr),
+      col: 2, columns: OPP_COLUMNS, rows: lists.dealsWon.map(o => oppRow(o, x => x.type)) },
+    oppTable('Logos Won', 9, OPP_COLUMNS, lists.logosWon, o => o.type),
+  ]) + 1;
+  row = writeTables(sheet, row, [
+    oppTable('Lost Pipeline', 2, OPP_COLUMNS, lists.lostPipeline, o => o.type),
   ]) + 1;
   row = writeTables(sheet, row, [
     oppTable('Churned Customers', 2, RENEWAL_COLUMNS, lists.churned, o => o.recordType),
@@ -204,10 +221,14 @@ function renderTeamTab(sheet, view) {
   ]) + 1;
 
   const [q1, q2] = view.future;
+  const future1 = formulaContext(view.team, q1.quarter, memberTeams, false);
+  const future2 = formulaContext(view.team, q2.quarter, memberTeams, false);
+  future1.startingArr = () => METRIC_FORMULAS.endingArr(current);
+  future2.startingArr = () => future1.addr.forecastEndingArr;
   row = writeSection(sheet, row, 'FUTURE QUARTER(S)', `Forecast for ${q1.quarter} and ${q2.quarter}, pipeline = open opportunities only`);
   row = Math.max(
-    writeBlock(sheet, row, 2, ['Metric', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ROWS, [q1, q2], null, null),
-    writeBlock(sheet, row, 7, ['ARR forecast', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ARR_ROWS, [q1, q2], null, null),
+    writeBlock(sheet, row, 2, ['Metric', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ROWS, [q1, q2], null, null, null, [future1, future2]),
+    writeBlock(sheet, row, 7, ['ARR forecast', `Q+1 (${q1.quarter})`, `Q+2 (${q2.quarter})`], FUTURE_ARR_ROWS, [q1, q2], null, null, null, [future1, future2]),
   ) + 1;
   row = writeTables(sheet, row, [
     oppTable(`Top 10 Deals Q+1 ${q1.quarter}`, 2, DEAL_COLUMNS, q1.topDeals, o => o.stage),
@@ -221,9 +242,25 @@ function renderTeamTab(sheet, view) {
     renewalsDue(`Renewals due Q+1 ${q1.quarter}`, 2, q1),
     renewalsDue(`Renewals due Q+2 ${q2.quarter}`, 9, q2),
   ]) + 1;
+  const predictedChurn = (title, col, f) => ({
+    title: `${title} (${f.predictedChurn.length}, ${formatMoney(f.forecastChurnArr)} expected)`, col, columns: RENEWAL_DUE_COLUMNS,
+    rows: f.predictedChurn.map(o => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), o.closeDate || '', o.accountArr, o.expectedDeltaArr, o.owner || '']),
+  });
+  row = writeTables(sheet, row, [
+    predictedChurn(`Predicted Churn Q+1 ${q1.quarter}`, 2, q1),
+    predictedChurn(`Predicted Churn Q+2 ${q2.quarter}`, 9, q2),
+  ]) + 1;
 
   row = writeSection(sheet, row, 'PARTNER CONTRIBUTION', `Opportunities in the ${PARTNER_GROUP} group for this team`);
-  row = writeBlock(sheet, row, 2, trendHeader('Metric'), PARTNER_ROWS, [view.current], previous, sparklines) + 1;
+  row = writeBlock(sheet, row, 2, trendHeader('Metric'), PARTNER_ROWS, [view.current], previous, sparklines, null, [current]) + 1;
+
+  const reps = view.reps || [];
+  row = writeSection(sheet, row, 'REP ACTIVITY & PERFORMANCE', `Global GTM Dashboard > Majors Rep Performance measures for the team's reps: FY${parseQuarter(view.quarter).fy} attainment by opp owner, activity = Gong-synced, last ${REP_ACTIVITY_DAYS} days`);
+  row = writeTables(sheet, row, [
+    { title: `Reps (${reps.length})`, col: 2, width: LAST_COL - 1, columns: REP_COLUMNS,
+      rows: reps.map(r => [link(r.name, r.url), r.monthsInSeat, r.accountsOwned, r.repGoal, r.fyWonArr, r.attainmentPct, r.coveragePct,
+        r.meetings30d, r.activities30d, r.activityCoveragePct, r.pipelineCreatedArr, r.stalledArr, r.renewalRiskPct]) },
+  ]) + 1;
 
   row = writeSection(sheet, row, 'OWNERS & DATA QUALITY', `${view.quarter} by opportunity owner; Salesforce hygiene across ${view.quarter}, ${q1.quarter} and ${q2.quarter}`);
   const owners = view.owners || [];
@@ -303,8 +340,9 @@ function writeBanner(sheet, row, title, subtitle) {
     .setBorder(null, null, true, null, false, false, COLORS.ink, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 }
 
-// Six cards, two columns each: label / big value / QoQ delta. Returns the row after the cards.
-function writeKpiCards(sheet, row, current, previous) {
+// Six cards, two columns each: label / big value / QoQ delta. `addr` maps metric keys to the block cells the
+// card values point at. Returns the row after the cards.
+function writeKpiCards(sheet, row, current, previous, addr) {
   sheet.setRowHeight(row, 20);
   sheet.setRowHeight(row + 1, 36);
   sheet.setRowHeight(row + 2, 20);
@@ -318,7 +356,7 @@ function writeKpiCards(sheet, row, current, previous) {
     sheet.getRange(row, col, 1, span).merge().setValue(label.toUpperCase()).setFontSize(8).setFontColor(hero ? COLORS.onDark : COLORS.muted)
       .setHorizontalAlignment('left').setVerticalAlignment('bottom');
     if (KPI_NOTES[key]) sheet.getRange(row, col).setNote(KPI_NOTES[key]);
-    const value = sheet.getRange(row + 1, col, 1, span).merge().setValue(cellValue(kind, current[key])).setNumberFormat(FORMATS[kind])
+    const value = sheet.getRange(row + 1, col, 1, span).merge().setValue(addr && addr[key] ? `=${addr[key]}` : cellValue(kind, current[key])).setNumberFormat(FORMATS[kind])
       .setFontSize(hero ? 24 : 18).setFontWeight('bold').setFontColor(hero ? COLORS.card : COLORS.ink).setHorizontalAlignment('left').setVerticalAlignment('middle');
     if (RAG_KEYS.indexOf(key) >= 0) addRag(sheet, value, 'font');
     const delta = previous ? qoqText(kind, current[key], previous[key]) : '';
@@ -340,15 +378,20 @@ function writeSection(sheet, row, title, subtitle) {
   return row + 1;
 }
 
-// Header + one line per spec row. `values` holds one metrics object per value column. `shareOf` adds a
+// Header + one line per spec row. `values` holds one metrics object per value column, `ctxs` the matching formula
+// contexts (metric cells with a formula source are written as formulas, others as values). `shareOf` adds a
 // "% of <shareOf>" column for money rows. Returns the row after the block.
-function writeBlock(sheet, row, col, header, spec, values, previous, trend, shareOf) {
+function writeBlock(sheet, row, col, header, spec, values, previous, trend, shareOf, ctxs) {
   const width = header.length;
+  (ctxs || []).forEach((ctx, j) => spec.forEach(([, , key], i) => { ctx.addr[key] = cellA1(row + 1 + i, col + 1 + j); }));
   const body = spec.map(([label, kind, key]) => {
-    const line = [label].concat(values.map(m => cellValue(kind, m[key])));
+    const line = [label].concat(values.map((m, j) => (ctxs && metricFormula(key, ctxs[j])) || cellValue(kind, m[key])));
     if (previous) line.push(qoqText(kind, values[0][key], previous[key]));
     if (trend) line.push(trend[key] ? `=IFERROR(SPARKLINE(${trend[key]},{"charttype","line";"linewidth",2;"color","${COLORS.accent}"}),"")` : '');
-    if (shareOf != null) line.push(kind === 'money' && shareOf ? values[0][key] / shareOf : '');
+    if (shareOf != null) {
+      const start = ctxs && ctxs[0].addr.startingArr;
+      line.push(kind !== 'money' ? '' : start ? `=IF(${start}=0,"",${ctxs[0].addr[key]}/${start})` : shareOf ? values[0][key] / shareOf : '');
+    }
     return line.concat(Array(width - line.length).fill(''));
   });
   const colors = spec.map(([, , key]) => {
@@ -424,23 +467,31 @@ function addRag(sheet, range, mode) {
 }
 
 const link = (text, url) => ({ text: text || '-', url: url || '' });
+// The table lists the TOP_N largest wins; when there are more, the title says how much of the quarter's wins it shows.
+function dealsWonTitle(quarter, shown, wonCount, wonArr) {
+  const shownArr = sum(shown, 'deltaArr');
+  return wonCount > shown.length
+    ? `Top ${TOP_N} Deals Won ${quarter} (${shown.length} of ${wonCount} Closed Won shown: ${formatMoney(shownArr)} of ${formatMoney(wonArr)} Delta ARR)`
+    : `Top ${TOP_N} Deals Won ${quarter} (${wonCount} Closed Won, ${formatMoney(wonArr)} Delta ARR)`;
+}
 // Opportunity names are long; the cell just says "Link" and points at the opportunity record.
 const oppRow = (o, middle) => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), middle(o) || '', o.closeDate || '', o.deltaArr, o.owner || ''];
 
-// Side-by-side tables ({ title, col, columns, rows }), TABLE_WIDTH columns wide: title row, header row, one row per
+// Side-by-side tables ({ title, col, columns, rows, width? }), DEFAULT_TABLE_WIDTH columns wide unless `width` is given: title row, header row, one row per
 // item (or a single "-" row). Link cells become Salesforce hyperlinks. Returns the row after the tallest table.
 function writeTables(sheet, row, tables) {
   const height = Math.max(1, ...tables.map(t => t.rows.length));
   ensureRows(sheet, row + 2 + height);
-  tables.forEach(({ title, col, columns, rows }) => {
-    sheet.getRange(row, col, 1, TABLE_WIDTH).merge().setValue(title).setFontWeight('bold').setFontColor(COLORS.ink).setFontSize(9)
+  tables.forEach(({ title, col, columns, rows, width }) => {
+    const tableWidth = width || DEFAULT_TABLE_WIDTH;
+    sheet.getRange(row, col, 1, tableWidth).merge().setValue(title).setFontWeight('bold').setFontColor(COLORS.ink).setFontSize(9)
       .setBackground(COLORS.card).setVerticalAlignment('middle')
       .setBorder(null, null, true, null, false, false, COLORS.ink, SpreadsheetApp.BorderStyle.SOLID);
     sheet.setRowHeight(row, 24);
-    sheet.getRange(row + 1, col, 1, TABLE_WIDTH).setBackground(COLORS.card).setFontColor(COLORS.muted).setFontSize(8).setVerticalAlignment('middle');
+    sheet.getRange(row + 1, col, 1, tableWidth).setBackground(COLORS.card).setFontColor(COLORS.muted).setFontSize(8).setVerticalAlignment('middle');
     sheet.getRange(row + 1, col, 1, columns.length).setValues([columns.map(([header]) => header)])
       .setBorder(null, null, true, null, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
-    sheet.getRange(row + 2, col, height, TABLE_WIDTH).setBackground(COLORS.card).setVerticalAlignment('middle');
+    sheet.getRange(row + 2, col, height, tableWidth).setBackground(COLORS.card).setVerticalAlignment('middle');
     if (rows.length) {
       const plain = rows.map(r => r.map(v => (v && typeof v === 'object' ? v.text : v == null ? '' : v)));
       sheet.getRange(row + 2, col, rows.length, columns.length).setValues(plain)
@@ -457,7 +508,7 @@ function writeTables(sheet, row, tables) {
       if (kind === 'link') cells.setRichTextValues(rows.map(r => [linkValue(r[i])]));
       if (kind === 'text' || kind === 'link') cells.setWrap(true);
     });
-    sheet.getRange(row, col, height + 2, TABLE_WIDTH).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
+    sheet.getRange(row, col, height + 2, tableWidth).setBorder(true, true, true, true, false, false, COLORS.border, SpreadsheetApp.BorderStyle.SOLID);
   });
   return row + 2 + height;
 }
