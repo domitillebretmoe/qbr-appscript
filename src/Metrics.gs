@@ -1,11 +1,14 @@
 // Pure metric calculations. Opportunities are the plain objects built in fetchOpportunities.
 const RENEWAL_RECORD_TYPES = ['Renewal', 'Fed - Renewal'];
+// Opportunity types that land a new logo when Closed Won (MSP = managed service provider deal on a new account).
+const NEW_LOGO_TYPES = ['Land', 'MSP'];
 
 const sum = (rows, field) => rows.reduce((total, row) => total + row[field], 0);
 const unique = values => values.filter((v, i) => v && values.indexOf(v) === i);
 const ratio = (num, den) => (den ? num / den : null);
 const isRenewal = opp => RENEWAL_RECORD_TYPES.indexOf(opp.recordType) >= 0;
 const isWon = opp => opp.stage === 'Closed Won';
+const isNewLogo = opp => NEW_LOGO_TYPES.indexOf(opp.type) >= 0;
 const isLost = opp => opp.stage === 'Closed Lost';
 const inQuarter = (opps, quarter) => opps.filter(o => o.quarter === quarter);
 const byField = (rows, field, descending) => rows.slice().sort((a, b) => (descending ? b[field] - a[field] : a[field] - b[field]));
@@ -27,8 +30,8 @@ function quarterMetrics(opps, quarter, goal) {
   const fullChurnArr = sum(fullChurn, 'deltaArr');
   const churnArr = downgradeArr + fullChurnArr;
   const logoAttainment = sum(rows.filter(o => o.major), 'expectedLogoImpact');
-  const logosWonMajors = won.filter(o => o.type === 'Land' && o.major).length;
-  const newLogoArr = sum(won.filter(o => o.type === 'Land'), 'deltaArr');
+  const logosWonMajors = won.filter(o => isNewLogo(o) && o.major).length;
+  const newLogoArr = sum(won.filter(isNewLogo), 'deltaArr');
   const open = rows.filter(o => !o.isClosed);
   const openPipelineArr = sum(open, 'deltaArr');
   const remainingGoal = Math.max(0, (goal.revenue || 0) - netAddedArr);
@@ -64,13 +67,13 @@ function quarterMetrics(opps, quarter, goal) {
     lostPipelineArr: sum(lostPipeline, 'deltaArr'),
     topChurns: churnOpps.slice(0, 3).map(o => `${o.account} (${formatMoney(o.deltaArr)})`),
     churnReasons: unique(churnOpps.map(o => o.lostReason)),
-    logosWon: unique(won.filter(o => o.type === 'Land').map(o => o.account)),
+    logosWon: unique(won.filter(isNewLogo).map(o => o.account)),
     logosLost: unique(fullChurn.map(o => o.account)),
-    newLogos: won.filter(o => o.type === 'Land').length,
+    newLogos: won.filter(isNewLogo).length,
     // Opportunity lists behind the linked tables on the tab.
     lists: {
       dealsWon: byField(won, 'deltaArr', true).slice(0, TOP_N),
-      logosWon: byField(won.filter(o => o.type === 'Land'), 'deltaArr', true),
+      logosWon: byField(won.filter(isNewLogo), 'deltaArr', true),
       lostPipeline: byField(lostPipeline, 'deltaArr', true),
       churned: byField(fullChurn, 'deltaArr', false),
       downgrades: byField(downgrades, 'deltaArr', false),
@@ -80,7 +83,7 @@ function quarterMetrics(opps, quarter, goal) {
   };
 }
 
-// Forward-looking quarter. Net Forecast = Expected Delta ARR of Land + Expand + renewals expected to grow,
+// Forward-looking quarter. Net Forecast = Expected Delta ARR of Land / MSP + Expand + renewals expected to grow,
 // plus forecast churn (renewals expected to shrink). Renewal = record type, as for actuals.
 // `accounts` supplies the Current ARR that open renewals put up for renewal.
 function forecastMetrics(opps, quarter, startingArr, goal, accounts) {
@@ -90,7 +93,7 @@ function forecastMetrics(opps, quarter, startingArr, goal, accounts) {
   const withArr = list => list.map(o => Object.assign({}, o, { accountArr: arrOf[o.accountId] || 0 }));
   const renewalsDue = withArr(rows.filter(o => isRenewal(o) && !o.isClosed));
   const renewalArrDue = unique(renewalsDue.map(o => o.accountId)).reduce((total, id) => total + (arrOf[id] || 0), 0);
-  const landExpand = rows.filter(o => (o.type === 'Land' || o.type === 'Expand') && !isRenewal(o));
+  const landExpand = rows.filter(o => (isNewLogo(o) || o.type === 'Expand') && !isRenewal(o));
   const renewalUp = rows.filter(o => isRenewal(o) && o.expectedDeltaArr > 0);
   const churn = withArr(rows.filter(o => isRenewal(o) && o.expectedDeltaArr < 0));
   const forecastArr = sum(landExpand, 'expectedDeltaArr') + sum(renewalUp, 'expectedDeltaArr');
@@ -125,7 +128,7 @@ function forecastMetrics(opps, quarter, startingArr, goal, accounts) {
 function accountMetrics(accounts, opps, quarter) {
   const active = accounts.filter(a => a.currentArr > 0);
   const activated = accounts.filter(a => a.currentArr <= 0 && a.hasOpenOpp);
-  const wonLands = inQuarter(opps, quarter).filter(o => isWon(o) && o.type === 'Land');
+  const wonLands = inQuarter(opps, quarter).filter(o => isWon(o) && isNewLogo(o));
   return {
     activeCustomers: active.length,
     majorCustomers: active.filter(a => a.major).length,

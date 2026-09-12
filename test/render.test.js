@@ -416,13 +416,13 @@ test('an open quarter is labelled FORECAST and separates expected logos from log
   };
   // Helaba (Major) open Expand at 0.5 expected logo impact; Zalando's Land is won but not a Major.
   assert.equal(sheet.evaluate(metric('Logo Attainment (expected, incl. open opps)')), 0.5);
-  assert.equal(sheet.evaluate(metric('Logos Won (Closed Won Land, Majors)')), 0);
+  assert.equal(sheet.evaluate(metric('Logos Won (Closed Won Land / MSP, Majors)')), 0);
   assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q3-2026 QBR - FORECAST (quarter in progress, 49% elapsed)');
 
   const closed = render(sampleView('Q2-2026'));
   const q2 = label => { const cell = cellsWhere(closed, c => c.value === label)[0]; return closed.valueAt(cell.row, cell.col + 1); };
   assert.equal(q2('Logo Attainment (expected, incl. open opps)'), 0, 'Helaba won (+1) nets against Deutsche Telekom churn (-1)');
-  assert.equal(q2('Logos Won (Closed Won Land, Majors)'), 1);
+  assert.equal(q2('Logos Won (Closed Won Land / MSP, Majors)'), 1);
 });
 
 test('Top 10 Deals Won lists the quarter\'s Closed Won opps with links and ties out to Net Added ARR', () => {
