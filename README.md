@@ -41,10 +41,10 @@ quarter = `FiscalYear` / `FiscalQuarter` (FY26 Q1 starts 1 Feb 2026), Major = `A
   (the FY26 QBR COCKPIT - Partners report).
 - **Renewal rate** = won renewals / (won + lost renewals). **Logo attainment** = Σ Expected Logo Impact on Major accounts.
 - **Goals** come from `Goal__c` (`Net ARR` → revenue goal, `New Logos` → logo goal), summed over every Salesforce team matching the token.
-- **Net Forecast** = Σ Expected Delta ARR of Land + Expand + positive Renewal, plus forecast churn (negative Expected Delta ARR on renewals).
+- **Net Forecast** = Σ Expected Delta ARR of Land / MSP + Expand + positive Renewal, plus forecast churn (negative Expected Delta ARR on renewals).
   **Pipeline** = Σ Delta ARR of open opportunities; **coverage** = pipeline / revenue goal.
 - **Active customers** = accounts with Current ARR > 0 (split by Major tag). **Activated prospects** = accounts with no ARR and an open opportunity.
-  **Conversion** = Closed Won Lands / (Closed Won Lands + activated prospects). Account counts are as of the refresh.
+  **Conversion** = Closed Won Land / MSP opps / (those + activated prospects). Account counts are as of the refresh.
 - **Lost pipeline** = Closed Lost non-renewal opportunities in the quarter (count, Σ Delta ARR). It is not churn:
   **Churned Customers** = Closed Lost renewals, **Downgrade Customers** = Closed Won renewals with Delta ARR < 0.
 - **Tables**: Logos Won, Lost Pipeline, Churned / Downgrade Customers, Renewals Won / Lost, Top 10 Major / Enterprise

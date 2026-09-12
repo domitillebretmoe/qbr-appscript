@@ -33,6 +33,7 @@ function rawFormula(fn, sumColumn, ctx, criteria) {
 const rawSum = (column, ctx, ...criteria) => rawFormula('SUMIFS', column, ctx, criteria);
 const rawCount = (ctx, ...criteria) => rawFormula('COUNTIFS', null, ctx, criteria);
 const perRenewalType = build => RENEWAL_RECORD_TYPES.map(build).join('+');
+const perNewLogoType = build => NEW_LOGO_TYPES.map(build).join('+');
 const notRenewal = () => RENEWAL_RECORD_TYPES.map(type => ['Record Type', `<>${type}`]);
 const goalSum = (column, ctx) => `SUMIFS(${sheetCol(GOALS_SHEET, GOALS_HEADER, column)},${sheetCol(GOALS_SHEET, GOALS_HEADER, 'Tab')},${ctx.team},${sheetCol(GOALS_SHEET, GOALS_HEADER, 'Quarter')},${ctx.quarter})`;
 const ledgerSum = (column, ctx) => (ctx.members || []).map(member =>
@@ -44,9 +45,10 @@ const refs = (ctx, ...keys) => (keys.every(k => ctx.addr[k]) ? keys.map(k => ctx
 const wonArr = ctx => rawSum('Delta ARR', ctx, ['Stage', 'Closed Won']);
 const fullChurnArr = ctx => rawSum('Delta ARR', ctx, ['Bucket', 'Full churn']);
 const downgradeArr = ctx => rawSum('Delta ARR', ctx, ['Bucket', 'Won renewal - downgrade']);
-const newLogoArr = ctx => rawSum('Delta ARR', ctx, ['Stage', 'Closed Won'], ['Type', 'Land']);
+const newLogoCount = (ctx, ...criteria) => perNewLogoType(type => rawCount(ctx, ['Stage', 'Closed Won'], ['Type', type], ...criteria));
+const newLogoArr = ctx => perNewLogoType(type => rawSum('Delta ARR', ctx, ['Stage', 'Closed Won'], ['Type', type]));
 const netAddedArr = ctx => `${wonArr(ctx)}+${fullChurnArr(ctx)}`;
-const forecastArr = ctx => `${rawSum('Expected Delta ARR', ctx, ['Type', 'Land'], ...notRenewal())}+${rawSum('Expected Delta ARR', ctx, ['Type', 'Expand'], ...notRenewal())}`
+const forecastArr = ctx => `${perNewLogoType(type => rawSum('Expected Delta ARR', ctx, ['Type', type], ...notRenewal()))}+${rawSum('Expected Delta ARR', ctx, ['Type', 'Expand'], ...notRenewal())}`
   + `+${perRenewalType(type => rawSum('Expected Delta ARR', ctx, ['Record Type', type], ['Expected Delta ARR', '>0']))}`;
 const forecastChurnArr = ctx => perRenewalType(type => rawSum('Expected Delta ARR', ctx, ['Record Type', type], ['Expected Delta ARR', '<0']));
 const partner = () => ['Group', PARTNER_GROUP];
@@ -66,7 +68,8 @@ const METRIC_FORMULAS = {
   },
   logoAttainment: ctx => rawSum('Expected Logo Impact', ctx, ['Major Account', 'Yes']),
   logoForecast: ctx => rawSum('Expected Logo Impact', ctx, ['Major Account', 'Yes']),
-  logosWonMajors: ctx => rawCount(ctx, ['Stage', 'Closed Won'], ['Type', 'Land'], ['Major Account', 'Yes']),
+  logosWonLand: ctx => rawCount(ctx, ['Stage', 'Closed Won'], ['Type', 'Land'], ['Major Account', 'Yes']),
+  logosWonMajors: ctx => newLogoCount(ctx, ['Major Account', 'Yes']),
   logoAttainmentPct: ctx => { const r = refs(ctx, 'logoAttainment', 'logoGoal'); return r && safeRatio(`MAX(0,${r[0]})`, r[1]); },
   renewals: ctx => `${rawCount(ctx, ['Bucket', 'Won renewal*'])}+${rawCount(ctx, ['Bucket', 'Full churn'])}`,
   wonRenewals: ctx => rawCount(ctx, ['Bucket', 'Won renewal*']),
@@ -82,11 +85,11 @@ const METRIC_FORMULAS = {
   fullChurnArr,
   fullChurnCount: ctx => rawCount(ctx, ['Bucket', 'Full churn']),
   grr: ctx => { const r = refs(ctx, 'startingArr', 'churnArr'); return r && safeRatio(`(${r[0]}+${r[1]})`, r[0]); },
-  nrr: ctx => { const r = refs(ctx, 'startingArr', 'churnArr', 'addedArr'); return r && safeRatio(`(${r[0]}+${r[1]}+${r[2]}-${newLogoArr(ctx)})`, r[0]); },
+  nrr: ctx => { const r = refs(ctx, 'startingArr', 'churnArr', 'addedArr'); return r && safeRatio(`(${r[0]}+${r[1]}+${r[2]}-(${newLogoArr(ctx)}))`, r[0]); },
   conversionRate: ctx => {
     const r = refs(ctx, 'activatedProspects');
-    const lands = rawCount(ctx, ['Stage', 'Closed Won'], ['Type', 'Land']);
-    return r && safeRatio(lands, `(${lands}+${r[0]})`);
+    const lands = newLogoCount(ctx);
+    return r && safeRatio(`(${lands})`, `(${lands}+${r[0]})`);
   },
   lostPipelineCount: ctx => rawCount(ctx, ['Bucket', 'Lost pipeline']),
   lostPipelineArr: ctx => rawSum('Delta ARR', ctx, ['Bucket', 'Lost pipeline']),
@@ -99,7 +102,7 @@ const METRIC_FORMULAS = {
   forecastChurnCount: ctx => perRenewalType(type => rawCount(ctx, ['Record Type', type], ['Expected Delta ARR', '<0'], ['Expected Logo Impact', '<0'])),
   forecastEndingArr: ctx => { const r = refs(ctx, 'startingArr', 'forecastArr', 'forecastChurnArr'); return r && `${r[0]}+${r[1]}+${r[2]}`; },
   partnerNetAddedArr: ctx => `${rawSum('Delta ARR', ctx, ['Stage', 'Closed Won'], partner())}+${rawSum('Delta ARR', ctx, ['Bucket', 'Full churn'], partner())}`,
-  partnerNewLogos: ctx => rawCount(ctx, ['Stage', 'Closed Won'], ['Type', 'Land'], partner()),
+  partnerNewLogos: ctx => newLogoCount(ctx, partner()),
   partnerChurnArr: ctx => `${rawSum('Delta ARR', ctx, ['Bucket', 'Won renewal - downgrade'], partner())}+${rawSum('Delta ARR', ctx, ['Bucket', 'Full churn'], partner())}`,
   partnerChurnCustomers: ctx => rawCount(ctx, ['Bucket', 'Full churn'], partner()),
 };
