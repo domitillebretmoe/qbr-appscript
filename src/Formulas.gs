@@ -68,6 +68,7 @@ const METRIC_FORMULAS = {
   },
   logoAttainment: ctx => rawSum('Expected Logo Impact', ctx, ['Major Account', 'Yes']),
   logoForecast: ctx => rawSum('Expected Logo Impact', ctx, ['Major Account', 'Yes']),
+  logosWonLand: ctx => rawCount(ctx, ['Stage', 'Closed Won'], ['Type', 'Land'], ['Major Account', 'Yes']),
   logosWonMajors: ctx => newLogoCount(ctx, ['Major Account', 'Yes']),
   logoAttainmentPct: ctx => { const r = refs(ctx, 'logoAttainment', 'logoGoal'); return r && safeRatio(`MAX(0,${r[0]})`, r[1]); },
   renewals: ctx => `${rawCount(ctx, ['Bucket', 'Won renewal*'])}+${rawCount(ctx, ['Bucket', 'Full churn'])}`,

@@ -30,6 +30,7 @@ function quarterMetrics(opps, quarter, goal) {
   const fullChurnArr = sum(fullChurn, 'deltaArr');
   const churnArr = downgradeArr + fullChurnArr;
   const logoAttainment = sum(rows.filter(o => o.major), 'expectedLogoImpact');
+  const logosWonLand = won.filter(o => o.type === 'Land' && o.major).length;
   const logosWonMajors = won.filter(o => isNewLogo(o) && o.major).length;
   const newLogoArr = sum(won.filter(isNewLogo), 'deltaArr');
   const open = rows.filter(o => !o.isClosed);
@@ -43,6 +44,7 @@ function quarterMetrics(opps, quarter, goal) {
     attainment: ratio(netAddedArr, goal.revenue),
     logoGoal: goal.logos,
     logoAttainment,
+    logosWonLand,
     logosWonMajors,
     logoAttainmentPct: ratio(Math.max(0, logoAttainment), goal.logos),
     addedArr: netAddedArr - churnArr,

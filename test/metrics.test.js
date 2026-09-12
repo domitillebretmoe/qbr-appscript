@@ -320,6 +320,7 @@ test('MSP deals land a logo like Land: Logos Won, New logos, Logos Won table, co
   const base = quarterMetrics(dach, 'Q3-2026', { revenue: 7500000, logos: 2 });
   const m = quarterMetrics(dach.concat(siemens), 'Q3-2026', { revenue: 7500000, logos: 2 });
   assert.equal(m.logosWonMajors, base.logosWonMajors + 1);
+  assert.equal(m.logosWonLand, base.logosWonLand, 'Land-only count ignores MSP');
   assert.equal(m.newLogos, base.newLogos + 1);
   assert.equal(m.newLogoArr, base.newLogoArr);
   assert.equal(m.logoAttainment, base.logoAttainment, 'expected logo attainment still follows Expected Logo Impact');

@@ -119,8 +119,8 @@ function tableRows(sheet, prefix) {
 test('linked tables: churn vs lost pipeline, renewals, top customers, top deals, every name links to Salesforce', () => {
   const sheet = render(sampleView('Q3-2026'));
 
-  const logos = tableRows(sheet, 'Logos Won (1)');
-  assert.equal(logos.title, 'Logos Won (1)');
+  const logos = tableRows(sheet, 'Logos Won (Land + MSP) (1)');
+  assert.equal(logos.title, 'Logos Won (Land + MSP) (1)');
   assert.deepEqual(logos.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
   assert.equal(logos.rows[0][0].value, 'Zalando');
   assert.equal(logos.rows[0][0].link, accountUrl('Zalando'));
@@ -416,13 +416,15 @@ test('an open quarter is labelled FORECAST and separates expected logos from log
   };
   // Helaba (Major) open Expand at 0.5 expected logo impact; Zalando's Land is won but not a Major.
   assert.equal(sheet.evaluate(metric('Logo Attainment (expected, incl. open opps)')), 0.5);
-  assert.equal(sheet.evaluate(metric('Logos Won (Closed Won Land / MSP, Majors)')), 0);
+  assert.equal(sheet.evaluate(metric('Logos Won (Land + MSP, Majors)')), 0);
+  assert.equal(sheet.evaluate(metric('Logos Won (Land only, Majors)')), 0);
   assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q3-2026 QBR - FORECAST (quarter in progress, 49% elapsed)');
 
   const closed = render(sampleView('Q2-2026'));
   const q2 = label => { const cell = cellsWhere(closed, c => c.value === label)[0]; return closed.valueAt(cell.row, cell.col + 1); };
   assert.equal(q2('Logo Attainment (expected, incl. open opps)'), 0, 'Helaba won (+1) nets against Deutsche Telekom churn (-1)');
-  assert.equal(q2('Logos Won (Closed Won Land / MSP, Majors)'), 1);
+  assert.equal(q2('Logos Won (Land + MSP, Majors)'), 1);
+  assert.equal(q2('Logos Won (Land only, Majors)'), 1);
 });
 
 test('Top 10 Deals Won lists the quarter\'s Closed Won opps with links and ties out to Net Added ARR', () => {

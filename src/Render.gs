@@ -43,7 +43,8 @@ const PREVIOUS_ROWS = [
   ['Pipeline coverage of remaining goal', 'mult', 'pipelineCoverage'],
   ['Logo Goal', 'int', 'logoGoal'],
   ['Logo Attainment (expected, incl. open opps)', 'int', 'logoAttainment'],
-  ['Logos Won (Closed Won Land / MSP, Majors)', 'int', 'logosWonMajors'],
+  ['Logos Won (Land only, Majors)', 'int', 'logosWonLand'],
+  ['Logos Won (Land + MSP, Majors)', 'int', 'logosWonMajors'],
   ['Logo Attainment (%)', 'pct', 'logoAttainmentPct'],
   ['# Renewals', 'int', 'renewals'],
   ['# Won Renewals', 'int', 'wonRenewals'],
@@ -122,7 +123,8 @@ const KPI_NOTES = {
   pipelineCoverage: 'Open pipeline / remaining goal (goal - Net Added ARR); empty once the goal is met. Future quarters: pipeline / goal.',
   logoGoal: 'New Logos goal for the quarter.',
   logoAttainment: 'Sum of Expected Logo Impact of all the quarter\'s opportunities on Major accounts, open ones included (churned logos count -1). A forecast until the quarter closes.',
-  logosWonMajors: 'Number of Closed Won "Land" or "MSP" opportunities on Major accounts: logos actually landed so far this quarter.',
+  logosWonLand: 'Number of Closed Won "Land" opportunities on Major accounts: logos actually landed so far this quarter, MSP deals excluded.',
+  logosWonMajors: 'Number of Closed Won "Land" or "MSP" opportunities on Major accounts: logos actually landed so far this quarter, MSP deals included.',
   logoAttainmentPct: 'Logo Attainment / Logo Goal (attainment below 0 counts as 0).',
   renewals: 'Won renewals + full churn (Closed Won + Closed Lost renewal opportunities).',
   wonRenewals: 'Closed Won opportunities of record type Renewal or Fed - Renewal.',
@@ -164,7 +166,7 @@ const KPI_NOTES = {
 };
 
 // Metrics kept per quarter in the data area (drives sparklines and the trend chart).
-const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logosWonMajors', 'logoAttainmentPct', 'endingArr',
+const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logosWonLand', 'logosWonMajors', 'logoAttainmentPct', 'endingArr',
   'renewals', 'wonRenewals', 'renewalRate', 'churnArr', 'churnCustomers', 'activeCustomers', 'conversionRate', 'lostPipelineCount',
   'lostPipelineArr', 'partnerNetAddedArr', 'partnerNewLogos', 'partnerChurnArr', 'partnerChurnCustomers', 'grr', 'nrr', 'pace',
   'openPipelineArr', 'pipelineCoverage'];
@@ -198,7 +200,7 @@ function renderTeamTab(sheet, view) {
   row = writeTables(sheet, row, [
     { title: dealsWonTitle(view.quarter, lists.dealsWon, view.current.wonCount, view.current.wonArr),
       col: 2, columns: OPP_COLUMNS, rows: lists.dealsWon.map(o => oppRow(o, x => x.type)) },
-    oppTable('Logos Won', 9, OPP_COLUMNS, lists.logosWon, o => o.type),
+    oppTable('Logos Won (Land + MSP)', 9, OPP_COLUMNS, lists.logosWon, o => o.type),
   ]) + 1;
   row = writeTables(sheet, row, [
     oppTable('Lost Pipeline', 2, OPP_COLUMNS, lists.lostPipeline, o => o.type),
