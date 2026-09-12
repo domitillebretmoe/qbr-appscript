@@ -27,21 +27,45 @@ function sfConnect() {
   return sfSession;
 }
 
+// UrlFetchApp rejects URLs longer than 2 KB; long queries (e.g. an IN list of 140 user Ids) go through the Composite
+// API as a POST body instead. Subsequent pages use the short nextRecordsUrl.
+const SF_MAX_URL = 1900;
+
 function soql(query) {
   const session = sfConnect();
-  let url = `${session.instanceUrl}${SF_API}/query?q=${encodeURIComponent(query)}`;
+  const queryPath = `${SF_API}/query?q=${encodeURIComponent(query)}`;
   const records = [];
-  while (url) {
-    const response = UrlFetchApp.fetch(url, {
-      headers: { Authorization: `Bearer ${session.token}` },
-      muteHttpExceptions: true,
-    });
-    if (response.getResponseCode() !== 200) throw new Error(`SOQL failed: ${response.getContentText()}\n${query}`);
-    const page = JSON.parse(response.getContentText());
+  let page = queryPath.length + session.instanceUrl.length > SF_MAX_URL
+    ? soqlComposite(session, queryPath, query)
+    : soqlGet(session, session.instanceUrl + queryPath, query);
+  while (page) {
     records.push(...page.records);
-    url = page.nextRecordsUrl ? session.instanceUrl + page.nextRecordsUrl : null;
+    page = page.nextRecordsUrl ? soqlGet(session, session.instanceUrl + page.nextRecordsUrl, query) : null;
   }
   return records;
+}
+
+function soqlGet(session, url, query) {
+  const response = UrlFetchApp.fetch(url, {
+    headers: { Authorization: `Bearer ${session.token}` },
+    muteHttpExceptions: true,
+  });
+  if (response.getResponseCode() !== 200) throw new Error(`SOQL failed: ${response.getContentText()}\n${query}`);
+  return JSON.parse(response.getContentText());
+}
+
+function soqlComposite(session, queryPath, query) {
+  const response = UrlFetchApp.fetch(`${session.instanceUrl}${SF_API}/composite`, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: `Bearer ${session.token}` },
+    payload: JSON.stringify({ allOrNone: true, compositeRequest: [{ method: 'GET', url: queryPath, referenceId: 'q' }] }),
+    muteHttpExceptions: true,
+  });
+  const text = response.getContentText();
+  const sub = response.getResponseCode() === 200 ? JSON.parse(text).compositeResponse[0] : null;
+  if (!sub || sub.httpStatusCode !== 200) throw new Error(`SOQL failed: ${sub ? JSON.stringify(sub.body) : text}\n${query}`);
+  return sub.body;
 }
 
 function soqlLiteral(text) {
