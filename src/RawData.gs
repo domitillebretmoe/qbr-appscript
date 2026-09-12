@@ -1,9 +1,9 @@
 // "Raw Data" sheet: every Salesforce opportunity behind the team tabs, one row per opportunity, so teams can
 // filter to their tab and tie the numbers out. Refreshing a tab replaces that tab's rows only.
 const RAW_HEADER = ['Tab', 'Resolved Team', 'Quarter', 'Account', 'Opportunity', 'Stage', 'Type', 'Record Type', 'Bucket',
-  'Close Date', 'Delta ARR', 'Expected Delta ARR', 'Expected Logo Impact', 'Major Account', 'Group', 'Opp Team', 'Owner',
+  'Close Date', 'Delta ARR', 'Deal Value (TCV)', 'Expected Delta ARR', 'Expected Logo Impact', 'Major Account', 'Group', 'Opp Team', 'Owner',
   'Lost Reason', 'Salesforce Id', 'Opportunity URL', 'Account URL'];
-const RAW_MONEY_COLS = [11, 12];
+const RAW_MONEY_COLS = [11, 12, 13];
 
 // How the opportunity is counted in the metrics (see Definitions).
 function rawBucket(opp) {
@@ -14,7 +14,7 @@ function rawBucket(opp) {
 
 function rawRow(tab, opp) {
   return [tab, opp.team, opp.quarter, opp.account, opp.name, opp.stage, opp.type, opp.recordType, rawBucket(opp),
-    opp.closeDate, opp.deltaArr, opp.expectedDeltaArr, opp.expectedLogoImpact, opp.major ? 'Yes' : 'No', opp.oppGroup, opp.oppTeam,
+    opp.closeDate, opp.deltaArr, opp.amount || 0, opp.expectedDeltaArr, opp.expectedLogoImpact, opp.major ? 'Yes' : 'No', opp.oppGroup, opp.oppTeam,
     opp.owner, opp.lostReason, opp.id, opp.url || '', opp.accountUrl || ''];
 }
 
@@ -40,7 +40,7 @@ function writeRawData(tab, opps) {
   if (rows.length) {
     sheet.getRange(2, 1, rows.length, RAW_HEADER.length).setValues(rows);
     RAW_MONEY_COLS.forEach(c => sheet.getRange(2, c, rows.length, 1).setNumberFormat(FORMATS.money));
-    sheet.getRange(2, 13, rows.length, 1).setNumberFormat('0.##');
+    sheet.getRange(2, 14, rows.length, 1).setNumberFormat('0.##');
   }
   sheet.getRange(1, 1, Math.max(2, rows.length + 1), RAW_HEADER.length).setFontFamily(FONT).setFontSize(9);
   sheet.getRange(1, 1, rows.length + 1, RAW_HEADER.length).createFilter();
@@ -49,7 +49,7 @@ function writeRawData(tab, opps) {
   sheet.setColumnWidths(1, RAW_HEADER.length, 110);
   [4, 5].forEach(c => sheet.setColumnWidth(c, 220));
   sheet.setColumnWidth(9, 170);
-  sheet.setColumnWidth(18, 200);
-  sheet.setColumnWidths(20, 2, 260);
+  sheet.setColumnWidth(19, 200);
+  sheet.setColumnWidths(21, 2, 260);
   return sheet;
 }

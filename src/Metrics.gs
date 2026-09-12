@@ -75,7 +75,7 @@ function quarterMetrics(opps, quarter, goal) {
     // Opportunity lists behind the linked tables on the tab.
     lists: {
       dealsWon: byField(won, 'deltaArr', true).slice(0, TOP_N),
-      logosWon: byField(won.filter(isNewLogo), 'deltaArr', true),
+      logosWon: byField(won.filter(isNewLogo), 'amount', true),
       lostPipeline: byField(lostPipeline, 'deltaArr', true),
       churned: byField(fullChurn, 'deltaArr', false),
       downgrades: byField(downgrades, 'deltaArr', false),

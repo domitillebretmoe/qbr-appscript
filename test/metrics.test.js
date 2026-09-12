@@ -316,7 +316,7 @@ test('definitions tab covers every block of a team tab', () => {
 });
 
 test('MSP deals land a logo like Land: Logos Won, New logos, Logos Won table, conversion, forecast ARR', () => {
-  const siemens = opp('Q3-2026', 'Closed Won', 'SIEMENS AG', 'MSP', 'Enterprise', 0, 0, { major: true, closeDate: '2026-09-03' });
+  const siemens = opp('Q3-2026', 'Closed Won', 'SIEMENS AG', 'MSP', 'Enterprise', 0, 0, { major: true, closeDate: '2026-09-03', amount: 95520 });
   const base = quarterMetrics(dach, 'Q3-2026', { revenue: 7500000, logos: 2 });
   const m = quarterMetrics(dach.concat(siemens), 'Q3-2026', { revenue: 7500000, logos: 2 });
   assert.equal(m.logosWonMajors, base.logosWonMajors + 1);
@@ -325,6 +325,7 @@ test('MSP deals land a logo like Land: Logos Won, New logos, Logos Won table, co
   assert.equal(m.newLogoArr, base.newLogoArr);
   assert.equal(m.logoAttainment, base.logoAttainment, 'expected logo attainment still follows Expected Logo Impact');
   assert.ok(m.lists.logosWon.some(o => o.account === 'SIEMENS AG'));
+  assert.equal(m.lists.logosWon.find(o => o.account === 'SIEMENS AG').amount, 95520, 'deal value shown although Delta ARR is 0');
   assert.ok(m.logosWon.includes('SIEMENS AG'));
 
   const accounts = [{ id: 'Prospect', major: false, currentArr: 0, hasOpenOpp: true }];

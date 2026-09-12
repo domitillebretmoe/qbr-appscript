@@ -121,13 +121,14 @@ test('linked tables: churn vs lost pipeline, renewals, top customers, top deals,
 
   const logos = tableRows(sheet, 'Logos Won (Land + MSP) (1)');
   assert.equal(logos.title, 'Logos Won (Land + MSP) (1)');
-  assert.deepEqual(logos.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
+  assert.deepEqual(logos.headers, ['Account', 'Opportunity', 'Type', 'Deal value (TCV)', 'Delta ARR', 'Owner']);
   assert.equal(logos.rows[0][0].value, 'Zalando');
   assert.equal(logos.rows[0][0].link, accountUrl('Zalando'));
   assert.match(logos.rows[0][0].link, /^https:\/\/codeium\.lightning\.force\.com\/lightning\/r\/Account\/001[A-Za-z0-9]{15}\/view$/);
   assert.match(logos.rows[0][1].link, /\/lightning\/r\/Opportunity\/006\d{15}\/view$/);
   assert.equal(logos.rows[0][1].value, 'Link', 'opportunity column is a short "Link" cell');
-  assert.equal(logos.rows[0][3].value, '2025-08-20');
+  assert.equal(logos.rows[0][3].value, 288000, 'deal value = Salesforce Amount (TCV)');
+  assert.equal(logos.rows[0][3].numberFormat, '$#,##0;[Red]($#,##0)');
   assert.equal(logos.rows[0][4].value, 96000);
   assert.equal(logos.rows[0][4].numberFormat, '$#,##0;[Red]($#,##0)');
 
@@ -431,8 +432,9 @@ test('Top 10 Deals Won lists the quarter\'s Closed Won opps with links and ties 
   const sheet = render(sampleView('Q3-2026'));
   const deals = tableRows(sheet, 'Top 10 Deals Won Q3-2026');
   assert.equal(deals.title, 'Top 10 Deals Won Q3-2026 (3 Closed Won, $78K Delta ARR)');
-  assert.deepEqual(deals.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
+  assert.deepEqual(deals.headers, ['Account', 'Opportunity', 'Type', 'Deal value (TCV)', 'Delta ARR', 'Owner']);
   assert.deepEqual(deals.rows.map(r => r[0].value), ['Zalando', 'CompuGroup', 'Julius Baer']);
+  assert.deepEqual(deals.rows.map(r => r[3].value), [288000, 0, 0], 'deal value defaults to 0 when Amount is empty');
   assert.deepEqual(deals.rows.map(r => r[2].value), ['Land', 'Renewal', 'Renewal']);
   assert.deepEqual(deals.rows.map(r => r[4].value), [96000, 12000, -30000]);
   deals.rows.forEach(r => {
