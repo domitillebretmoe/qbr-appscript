@@ -288,18 +288,21 @@ test('owner table: net added, won count, churn and pipeline per opportunity owne
 
 test('owner table: owners with only Closed Lost pipeline are dropped, owners from another team are flagged', () => {
   const rows = [
-    opp('Q3-2026', 'Closed Won', 'Siemens', 'MSP', 'Enterprise', 95520, 1, { owner: 'Kalle Harnos' }),
-    opp('Q3-2026', 'Closed Lost', 'Deutsche Bank', 'Land', 'Enterprise', 0, 0, { owner: 'Berry Yirrell' }),
-    opp('Q3-2026', 'Closed Lost', 'Adecco', 'Land', 'Enterprise', 0, 0, { owner: 'Claudia Hubert' }),
-    opp('Q3-2026', 'Closed Won', 'Mercedes', 'Expand', 'Enterprise', 2912000, 0, { owner: 'Berry Yirrell' }),
-    opp('Q3-2026', 'Closed Won', 'Serrala', 'Renewal', 'Renewal', 0, 0, { owner: 'Robin Werner' }),
+    opp('Q3-2026', 'Closed Won', 'Siemens', 'MSP', 'Enterprise', 95520, 1, { owner: 'Kalle Harnos', ownerId: '005K' }),
+    opp('Q3-2026', 'Closed Lost', 'Deutsche Bank', 'Land', 'Enterprise', 0, 0, { owner: 'Berry Yirrell', ownerId: '005B' }),
+    opp('Q3-2026', 'Closed Lost', 'Adecco', 'Land', 'Enterprise', 0, 0, { owner: 'Claudia Hubert', ownerId: '005C' }),
+    opp('Q3-2026', 'Closed Won', 'Mercedes', 'Expand', 'Enterprise', 2912000, 0, { owner: 'Berry Yirrell', ownerId: '005B' }),
+    opp('Q3-2026', 'Closed Won', 'Serrala', 'Renewal', 'Renewal', 0, 0, { owner: 'Robin Werner', ownerId: '005R' }),
+    // a second, distinct Salesforce user with the same display name as Robin Werner
+    opp('Q4-2026', '1- Discovery', 'Erste', 'Land', 'Enterprise', 40000, 1, { owner: 'Robin Werner', ownerId: '005R2' }),
   ];
-  const teams = { 'Kalle Harnos': 'Europe Majors - DACH', 'Berry Yirrell': 'Europe Majors - UKI', 'Robin Werner': 'Europe - DACH' };
+  const teams = { '005K': 'Europe Majors - DACH', '005B': 'Europe Majors - UKI', '005R': 'Europe - DACH', '005R2': 'Europe - UKI' };
   const owners = ownerMetrics(rows, 'Q3-2026', 'Q4-2026', teams, ['Europe - DACH']);
-  assert.deepEqual(owners.map(ownerLabel), ['Berry Yirrell (Europe Majors - UKI)', 'Kalle Harnos', 'Robin Werner']);
-  assert.deepEqual(owners.map(o => o.own), [false, true, true]);
+  assert.deepEqual(owners.map(ownerLabel), ['Berry Yirrell (Europe Majors - UKI)', 'Kalle Harnos', 'Robin Werner', 'Robin Werner (Europe - UKI)']);
+  assert.deepEqual(owners.map(o => o.own), [false, true, true, false]);
+  assert.deepEqual(owners.map(o => o.nextPipelineArr), [0, 0, 0, 40000]);
   // no team map / no members: nobody is flagged, the zero-only owner is still dropped
-  assert.deepEqual(ownerMetrics(rows, 'Q3-2026', 'Q4-2026').map(ownerLabel), ['Berry Yirrell', 'Kalle Harnos', 'Robin Werner']);
+  assert.deepEqual(ownerMetrics(rows, 'Q3-2026', 'Q4-2026').map(ownerLabel), ['Berry Yirrell', 'Kalle Harnos', 'Robin Werner', 'Robin Werner']);
   // unknown team (owner without a User Segment) counts as the tab's own
   assert.equal(ownerLabel(ownerMetrics(rows, 'Q3-2026', 'Q4-2026', {}, ['Europe - DACH'])[0]), 'Berry Yirrell');
 });

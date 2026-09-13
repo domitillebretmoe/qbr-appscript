@@ -198,7 +198,7 @@ function buildView(team, quarter) {
     ledgers,
     unassignedAccounts: fetchRegionOnlyAccounts(team),
     reps: fetchRepPerformance(team, quarter, todayIso()),
-    ownerTeams: fetchOwnerTeams(unique(opps.map(o => o.owner).filter(Boolean))),
+    ownerTeams: fetchOwnerTeams(unique(opps.map(o => o.ownerId).filter(Boolean))),
     today: todayIso(),
   });
 }

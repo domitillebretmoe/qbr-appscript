@@ -40,9 +40,9 @@ const data = team => byTeam[team] || empty;
 test('Europe roll-up sums its member teams, keeps opportunities attributed to the sub-team, ledger = sum of member rows', () => {
   const fetched = [];
   const ledgerCalls = [];
-  let ownerNames = null;
+  let ownerIds = null;
   const ctx = mainContext({
-    fetchOwnerTeams: names => { ownerNames = names; return {}; },
+    fetchOwnerTeams: ids => { ownerIds = ids; return {}; },
     fetchOpportunities: team => { fetched.push(team); return data(team).opps; },
     fetchAccounts: team => data(team).accounts,
     fetchGoals: team => data(team).goals,
@@ -59,7 +59,7 @@ test('Europe roll-up sums its member teams, keeps opportunities attributed to th
   assert.deepEqual(fetched, ['Europe - Nordics', 'Europe - Benelux', 'Europe - UKI', 'Europe - DACH', 'Europe - South']);
   assert.ok(!fetched.includes('Europe'));
   assert.deepEqual(view.members, fetched);
-  assert.deepEqual(ownerNames, ['Anna Berger']);
+  assert.deepEqual(ownerIds, ['005AnnaBerger00000']);
   assert.deepEqual(view.opps.map(o => o.team).sort(), ['Europe - DACH', 'Europe - DACH', 'Europe - DACH', 'Europe - UKI', 'Europe - UKI']);
 
   const q3 = view.current;

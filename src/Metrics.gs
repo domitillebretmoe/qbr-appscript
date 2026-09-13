@@ -182,29 +182,35 @@ function statusText(metrics) {
   return `FORECAST (quarter in progress, ${Math.round((metrics.quarterElapsedPct || 0) * 100)}% elapsed)`;
 }
 
-// One row per opportunity owner for the selected quarter, best Net Added ARR first. Owners with nothing to show
-// (only Closed Lost pipeline) are skipped; `ownerTeams` (owner name -> Salesforce team) flags owners from another
-// team than the tab's `members`.
+// Salesforce user Id of an opportunity's owner (two users can share a display name); falls back to the name.
+function ownerKey(o) {
+  return o.ownerId || o.owner;
+}
+
+// One row per opportunity owner (by Salesforce user) for the selected quarter, best Net Added ARR first. Owners with
+// nothing to show (only Closed Lost pipeline) are skipped; `ownerTeams` (owner key -> Salesforce team) flags owners
+// from another team than the tab's `members`.
 function ownerMetrics(opps, quarter, nextQuarter, ownerTeams, members) {
   const rows = inQuarter(opps, quarter);
   const next = inQuarter(opps, nextQuarter).filter(o => !o.isClosed);
-  const owners = unique(rows.concat(next).map(o => o.owner));
+  const keys = unique(rows.concat(next).map(ownerKey));
   const teams = ownerTeams || {};
-  return owners.map(owner => {
-    const mine = rows.filter(o => o.owner === owner);
+  return keys.map(key => {
+    const mine = rows.filter(o => ownerKey(o) === key);
     const won = mine.filter(isWon);
     const fullChurn = mine.filter(o => isLost(o) && isRenewal(o));
     const downgrades = won.filter(o => isRenewal(o) && o.deltaArr < 0);
-    const team = teams[owner] || '';
+    const team = teams[key] || '';
+    const mineNext = next.filter(o => ownerKey(o) === key);
     return {
-      owner,
+      owner: (mine[0] || mineNext[0]).owner,
       team,
       own: !members || !team || members.some(m => teamMatches(team, m)),
       netAddedArr: sum(won, 'deltaArr') + sum(fullChurn, 'deltaArr'),
       wonCount: won.length,
       churnArr: sum(downgrades, 'deltaArr') + sum(fullChurn, 'deltaArr'),
       openPipelineArr: sum(mine.filter(o => !o.isClosed), 'deltaArr'),
-      nextPipelineArr: sum(next.filter(o => o.owner === owner), 'deltaArr'),
+      nextPipelineArr: sum(mineNext, 'deltaArr'),
     };
   }).filter(o => o.netAddedArr || o.wonCount || o.churnArr || o.openPipelineArr || o.nextPipelineArr)
     .sort((a, b) => b.netAddedArr - a.netAddedArr);
