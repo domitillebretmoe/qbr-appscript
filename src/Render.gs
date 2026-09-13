@@ -101,6 +101,8 @@ const PARTNER_ROWS = [
 ];
 // Linked tables: [header, kind]; kind "link" cells are { text, url }.
 const OPP_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Type', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
+// Closed Won deals: the booked deal value (Salesforce Amount / TCV) next to Delta ARR, which is 0 on e.g. MSP deals.
+const WON_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Type', 'text'], ['Deal value (TCV)', 'money'], ['Delta ARR', 'money'], ['Owner', 'text']];
 const RENEWAL_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Record type', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
 const DEAL_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Stage', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
 const CUSTOMER_COLUMNS = [['#', 'int'], ['Account', 'link'], ['Team', 'text'], ['Current ARR', 'money'], ['% of active ARR', 'pct'], ['Open opp', 'text']];
@@ -199,8 +201,8 @@ function renderTeamTab(sheet, view) {
   const oppTable = (title, col, columns, opps, middle) => ({ title: `${title} (${opps.length})`, col, columns, rows: opps.map(o => oppRow(o, middle)) });
   row = writeTables(sheet, row, [
     { title: dealsWonTitle(view.quarter, lists.dealsWon, view.current.wonCount, view.current.wonArr),
-      col: 2, columns: OPP_COLUMNS, rows: lists.dealsWon.map(o => oppRow(o, x => x.type)) },
-    oppTable('Logos Won (Land + MSP)', 9, OPP_COLUMNS, lists.logosWon, o => o.type),
+      col: 2, columns: WON_COLUMNS, rows: lists.dealsWon.map(wonRow) },
+    { title: `Logos Won (Land + MSP) (${lists.logosWon.length})`, col: 9, columns: WON_COLUMNS, rows: lists.logosWon.map(wonRow) },
   ]) + 1;
   row = writeTables(sheet, row, [
     oppTable('Lost Pipeline', 2, OPP_COLUMNS, lists.lostPipeline, o => o.type),
@@ -478,6 +480,7 @@ function dealsWonTitle(quarter, shown, wonCount, wonArr) {
 }
 // Opportunity names are long; the cell just says "Link" and points at the opportunity record.
 const oppRow = (o, middle) => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), middle(o) || '', o.closeDate || '', o.deltaArr, o.owner || ''];
+const wonRow = o => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), o.type || '', o.amount || 0, o.deltaArr, o.owner || ''];
 
 // Side-by-side tables ({ title, col, columns, rows, width? }), DEFAULT_TABLE_WIDTH columns wide unless `width` is given: title row, header row, one row per
 // item (or a single "-" row). Link cells become Salesforce hyperlinks. Returns the row after the tallest table.

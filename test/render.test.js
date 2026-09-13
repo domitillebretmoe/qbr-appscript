@@ -121,13 +121,14 @@ test('linked tables: churn vs lost pipeline, renewals, top customers, top deals,
 
   const logos = tableRows(sheet, 'Logos Won (Land + MSP) (1)');
   assert.equal(logos.title, 'Logos Won (Land + MSP) (1)');
-  assert.deepEqual(logos.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
+  assert.deepEqual(logos.headers, ['Account', 'Opportunity', 'Type', 'Deal value (TCV)', 'Delta ARR', 'Owner']);
   assert.equal(logos.rows[0][0].value, 'Zalando');
   assert.equal(logos.rows[0][0].link, accountUrl('Zalando'));
   assert.match(logos.rows[0][0].link, /^https:\/\/codeium\.lightning\.force\.com\/lightning\/r\/Account\/001[A-Za-z0-9]{15}\/view$/);
   assert.match(logos.rows[0][1].link, /\/lightning\/r\/Opportunity\/006\d{15}\/view$/);
   assert.equal(logos.rows[0][1].value, 'Link', 'opportunity column is a short "Link" cell');
-  assert.equal(logos.rows[0][3].value, '2025-08-20');
+  assert.equal(logos.rows[0][3].value, 288000, 'deal value = Salesforce Amount (TCV)');
+  assert.equal(logos.rows[0][3].numberFormat, '$#,##0;[Red]($#,##0)');
   assert.equal(logos.rows[0][4].value, 96000);
   assert.equal(logos.rows[0][4].numberFormat, '$#,##0;[Red]($#,##0)');
 
@@ -431,8 +432,9 @@ test('Top 10 Deals Won lists the quarter\'s Closed Won opps with links and ties 
   const sheet = render(sampleView('Q3-2026'));
   const deals = tableRows(sheet, 'Top 10 Deals Won Q3-2026');
   assert.equal(deals.title, 'Top 10 Deals Won Q3-2026 (3 Closed Won, $78K Delta ARR)');
-  assert.deepEqual(deals.headers, ['Account', 'Opportunity', 'Type', 'Close date', 'Delta ARR', 'Owner']);
+  assert.deepEqual(deals.headers, ['Account', 'Opportunity', 'Type', 'Deal value (TCV)', 'Delta ARR', 'Owner']);
   assert.deepEqual(deals.rows.map(r => r[0].value), ['Zalando', 'CompuGroup', 'Julius Baer']);
+  assert.deepEqual(deals.rows.map(r => r[3].value), [288000, 0, 0], 'deal value defaults to 0 when Amount is empty');
   assert.deepEqual(deals.rows.map(r => r[2].value), ['Land', 'Renewal', 'Renewal']);
   assert.deepEqual(deals.rows.map(r => r[4].value), [96000, 12000, -30000]);
   deals.rows.forEach(r => {
@@ -520,6 +522,30 @@ test('Raw Data tab lists every opportunity of the tab with its bucket and replac
   // Re-running for the same tab does not duplicate.
   ctx.writeRawData('Europe - DACH', dach);
   assert.equal(raw.getLastRow() - 1, dach.length + 1);
+});
+
+test('Raw Data keeps other tabs\' rows aligned by header when the column layout changed since they were written', () => {
+  const raw = new FakeSheet('Raw Data');
+  ctx.SpreadsheetApp.getActive = () => ({ getSheetByName: () => raw, insertSheet: () => raw });
+  const oldHeader = RAW_HEADER.filter(h => h !== 'Deal Value (TCV)');
+  const oldRow = oldHeader.map(h => ({ Tab: 'Europe - UKI', 'Resolved Team': 'Europe - UKI', Quarter: 'Q3-2026', Account: 'Barclays', Stage: 'Closed Won',
+    'Delta ARR': 50000, 'Expected Delta ARR': 40000, 'Expected Logo Impact': 1, 'Major Account': 'Yes', Owner: 'Rep', 'Salesforce Id': '006X' }[h] || ''));
+  raw.getRange(1, 1, 2, oldHeader.length).setValues([oldHeader, oldRow]);
+  ctx.writeRawData('Europe - DACH', dach);
+  const header = raw.getRange(1, 1, 1, RAW_HEADER.length).getValues()[0];
+  assert.deepEqual(header.join('|'), RAW_HEADER.join('|'));
+  const rows = raw.getRange(2, 1, raw.getLastRow() - 1, RAW_HEADER.length).getValues();
+  const kept = rows.find(r => r[0] === 'Europe - UKI');
+  const col = name => kept[RAW_HEADER.indexOf(name)];
+  assert.equal(col('Delta ARR'), 50000);
+  assert.equal(col('Deal Value (TCV)'), '', 'column the old layout lacked stays blank');
+  assert.equal(col('Expected Delta ARR'), 40000);
+  assert.equal(col('Expected Logo Impact'), 1);
+  assert.equal(col('Major Account'), 'Yes');
+  assert.equal(col('Owner'), 'Rep');
+  assert.equal(col('Salesforce Id'), '006X');
+  const zalando = rows.find(r => r[0] === 'Europe - DACH' && r[3] === 'Zalando' && r[2] === 'Q3-2026');
+  assert.equal(zalando[RAW_HEADER.indexOf('Deal Value (TCV)')], 288000);
 });
 
 if (process.argv.includes('--dump')) {

@@ -127,7 +127,7 @@ function fetchOpportunities(team, lastFiscalYear) {
 function queryOpportunities(team, lastFiscalYear) {
   const query = `
     SELECT Id, Name, StageName, IsClosed, IsWon, Type, RecordType.Name, CloseDate, FiscalYear, FiscalQuarter,
-           NACV__c, Expected_NACV__c, Expected_Logo_Impact__c, Closed_Lost_Reason_List__c, Closed_Lost_Reason__c,
+           Amount, NACV__c, Expected_NACV__c, Expected_Logo_Impact__c, Closed_Lost_Reason_List__c, Closed_Lost_Reason__c,
            AccountId, Account.Name, Account.Team__r.Name, Account.Subteam__r.Name, Account.Major_Admin_Tag__c,
            Team__r.Name, Group__r.Name, Owner.Name
     FROM Opportunity
@@ -147,6 +147,7 @@ function queryOpportunities(team, lastFiscalYear) {
     closeDate: r.CloseDate,
     quarter: quarterLabel(r.FiscalQuarter, r.FiscalYear),
     deltaArr: r.NACV__c || 0,
+    amount: r.Amount || 0,
     expectedDeltaArr: r.Expected_NACV__c || 0,
     expectedDeltaArrMissing: r.Expected_NACV__c == null,
     expectedLogoImpact: r.Expected_Logo_Impact__c || 0,
