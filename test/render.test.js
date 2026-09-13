@@ -524,6 +524,30 @@ test('Raw Data tab lists every opportunity of the tab with its bucket and replac
   assert.equal(raw.getLastRow() - 1, dach.length + 1);
 });
 
+test('Raw Data keeps other tabs\' rows aligned by header when the column layout changed since they were written', () => {
+  const raw = new FakeSheet('Raw Data');
+  ctx.SpreadsheetApp.getActive = () => ({ getSheetByName: () => raw, insertSheet: () => raw });
+  const oldHeader = RAW_HEADER.filter(h => h !== 'Deal Value (TCV)');
+  const oldRow = oldHeader.map(h => ({ Tab: 'Europe - UKI', 'Resolved Team': 'Europe - UKI', Quarter: 'Q3-2026', Account: 'Barclays', Stage: 'Closed Won',
+    'Delta ARR': 50000, 'Expected Delta ARR': 40000, 'Expected Logo Impact': 1, 'Major Account': 'Yes', Owner: 'Rep', 'Salesforce Id': '006X' }[h] || ''));
+  raw.getRange(1, 1, 2, oldHeader.length).setValues([oldHeader, oldRow]);
+  ctx.writeRawData('Europe - DACH', dach);
+  const header = raw.getRange(1, 1, 1, RAW_HEADER.length).getValues()[0];
+  assert.deepEqual(header.join('|'), RAW_HEADER.join('|'));
+  const rows = raw.getRange(2, 1, raw.getLastRow() - 1, RAW_HEADER.length).getValues();
+  const kept = rows.find(r => r[0] === 'Europe - UKI');
+  const col = name => kept[RAW_HEADER.indexOf(name)];
+  assert.equal(col('Delta ARR'), 50000);
+  assert.equal(col('Deal Value (TCV)'), '', 'column the old layout lacked stays blank');
+  assert.equal(col('Expected Delta ARR'), 40000);
+  assert.equal(col('Expected Logo Impact'), 1);
+  assert.equal(col('Major Account'), 'Yes');
+  assert.equal(col('Owner'), 'Rep');
+  assert.equal(col('Salesforce Id'), '006X');
+  const zalando = rows.find(r => r[0] === 'Europe - DACH' && r[3] === 'Zalando' && r[2] === 'Q3-2026');
+  assert.equal(zalando[RAW_HEADER.indexOf('Deal Value (TCV)')], 288000);
+});
+
 if (process.argv.includes('--dump')) {
   const quarter = process.argv[process.argv.indexOf('--dump') + 2] || 'Q3-2026';
   const view = sampleView(quarter, previewOpps, previewAccounts);

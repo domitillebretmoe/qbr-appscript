@@ -38,6 +38,7 @@ class FakeSheet {
   insertRowsAfter(after, n) { this.maxRows += n; return this; }
   insertColumnsAfter(after, n) { this.maxColumns += n; return this; }
   getLastRow() { return Math.max(0, ...Object.values(this.cells).map(c => c.row)); }
+  getLastColumn() { return Math.max(0, ...Object.values(this.cells).map(c => c.col)); }
   getRange(a, b, c, d) {
     if (typeof a === 'string') {
       const m = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/.exec(a);

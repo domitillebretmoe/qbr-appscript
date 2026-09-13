@@ -23,12 +23,21 @@ function rawSheet() {
   return ss.getSheetByName(RAW_SHEET) || ss.insertSheet(RAW_SHEET);
 }
 
+// Other tabs' rows, remapped by header name onto RAW_HEADER so rows written by an older column layout keep
+// their values under the right headers (columns the old layout lacked are left blank).
+function keptRawRows(sheet, tab) {
+  const width = Math.max(sheet.getLastColumn(), RAW_HEADER.length);
+  const header = sheet.getRange(1, 1, 1, width).getValues()[0].map(String);
+  const from = RAW_HEADER.map(name => header.indexOf(name));
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getValues()
+    .filter(row => row[0] !== tab)
+    .map(row => from.map(i => (i < 0 ? '' : row[i])));
+}
+
 // Replaces the rows of `tab` with `opps`, keeps every other tab's rows, and rewrites the sheet sorted.
 function writeRawData(tab, opps) {
   const sheet = rawSheet();
-  const kept = sheet.getLastRow() > 1
-    ? sheet.getRange(2, 1, sheet.getLastRow() - 1, RAW_HEADER.length).getValues().filter(row => row[0] !== tab)
-    : [];
+  const kept = sheet.getLastRow() > 1 ? keptRawRows(sheet, tab) : [];
   const rows = kept.concat(opps.map(opp => rawRow(tab, opp)))
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])) || String(a[2]).localeCompare(String(b[2])) || String(a[3]).localeCompare(String(b[3])));
 
