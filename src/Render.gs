@@ -274,7 +274,7 @@ function renderTeamTab(sheet, view) {
   const issues = view.dataQuality || [];
   row = writeTables(sheet, row, [
     { title: `Owner performance (${owners.length})`, col: 2, columns: OWNER_COLUMNS,
-      rows: owners.map(o => [o.owner || '-', o.netAddedArr, o.wonCount, o.churnArr, o.openPipelineArr, o.nextPipelineArr]) },
+      rows: owners.map(o => [ownerLabel(o), o.netAddedArr, o.wonCount, o.churnArr, o.openPipelineArr, o.nextPipelineArr]) },
     { title: `Data quality (${issues.length} ${issues.length === 1 ? 'issue' : 'issues'})`, col: 9, columns: QUALITY_COLUMNS,
       rows: issues.map(i => (i.opp
         ? [i.issue, link(i.opp.account, i.opp.accountUrl), link(i.opp.url ? 'Link' : '-', i.opp.url), i.detail, i.opp.closeDate || '', i.opp.owner || '']
