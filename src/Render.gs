@@ -109,10 +109,12 @@ const CUSTOMER_COLUMNS = [['#', 'int'], ['Account', 'link'], ['Team', 'text'], [
 const RENEWAL_DUE_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Close date', 'date'], ['Current ARR', 'money'], ['Expected Delta ARR', 'money'], ['Owner', 'text']];
 const OWNER_COLUMNS = [['Owner', 'text'], ['Net Added ARR', 'money'], ['# Won', 'int'], ['Churn ARR', 'money'], ['Open pipeline (Q)', 'money'], ['Pipeline Q+1', 'money']];
 const QUALITY_COLUMNS = [['Issue', 'text'], ['Account', 'link'], ['Opportunity', 'link'], ['Detail', 'text'], ['Close date', 'date'], ['Owner', 'text']];
-// Full-width rep table (13 columns, B..N), same measures as the Salesforce Majors Rep Performance tab.
-const REP_COLUMNS = [['Rep', 'link'], ['Months in seat', 'mult'], ['Accts owned', 'int'], ['Rep goal (FY)', 'money'], ['Won ARR (FY)', 'money'],
-  ['Attainment', 'pct'], ['Coverage', 'pct'], ['Meetings (30d)', 'int'], ['Activities (30d)', 'int'], ['Acct coverage (30d)', 'pct'],
-  ['Pipeline created (Q)', 'money'], ['Stalled >60d', 'money'], ['Renewal risk', 'pct']];
+// Full-width rep table (13 columns, B..N), the Salesforce Majors Rep Performance measures scoped to the tab's quarter
+// (QTD while it is in progress); goals only exist per fiscal year, so goal / FY Won ARR / attainment stay FY.
+const repColumns = period => [['Rep', 'link'], ['Months in seat', 'mult'], ['Accts owned', 'int'], ['Rep goal (FY)', 'money'],
+  [`Won ARR (${period})`, 'money'], ['Won ARR (FY)', 'money'], ['Attainment (FY)', 'pct'], [`Meetings (${period})`, 'int'],
+  [`Activities (${period})`, 'int'], [`Acct coverage (${period})`, 'pct'], [`Pipeline created (${period})`, 'money'],
+  ['Stalled >60d', 'money'], ['Renewal risk (FY)', 'pct']];
 
 // Hover note on each metric label (same definitions as the Definitions tab, in one line).
 const KPI_NOTES = {
@@ -259,11 +261,12 @@ function renderTeamTab(sheet, view) {
   row = writeBlock(sheet, row, 2, trendHeader('Metric'), PARTNER_ROWS, [view.current], previous, sparklines, null, [current]) + 1;
 
   const reps = view.reps || [];
-  row = writeSection(sheet, row, 'REP ACTIVITY & PERFORMANCE', `Global GTM Dashboard > Majors Rep Performance measures for the team's reps: FY${parseQuarter(view.quarter).fy} attainment by opp owner, activity = Gong-synced, last ${REP_ACTIVITY_DAYS} days`);
+  const repPeriod = view.current.phase === 'closed' ? 'Q' : 'QTD';
+  row = writeSection(sheet, row, 'REP ACTIVITY & PERFORMANCE', `Global GTM Dashboard > Majors Rep Performance measures for the team's reps, ${view.quarter}${repPeriod === 'QTD' ? ' to date' : ''} by opp owner (activity = Gong-synced); goal and attainment per FY${parseQuarter(view.quarter).fy}, rep goals have no quarter in Salesforce`);
   row = writeTables(sheet, row, [
-    { title: `Reps (${reps.length})`, col: 2, width: LAST_COL - 1, columns: REP_COLUMNS,
-      rows: reps.map(r => [link(r.name, r.url), r.monthsInSeat, r.accountsOwned, r.repGoal, r.fyWonArr, r.attainmentPct, r.coveragePct,
-        r.meetings30d, r.activities30d, r.activityCoveragePct, r.pipelineCreatedArr, r.stalledArr, r.renewalRiskPct]) },
+    { title: `Reps (${reps.length})`, col: 2, width: LAST_COL - 1, columns: repColumns(repPeriod),
+      rows: reps.map(r => [link(r.name, r.url), r.monthsInSeat, r.accountsOwned, r.repGoal, r.qWonArr, r.fyWonArr, r.attainmentPct,
+        r.meetings, r.activities, r.activityCoveragePct, r.pipelineCreatedArr, r.stalledArr, r.renewalRiskPct]) },
   ]) + 1;
 
   row = writeSection(sheet, row, 'OWNERS & DATA QUALITY', `${view.quarter} by opportunity owner; Salesforce hygiene across ${view.quarter}, ${q1.quarter} and ${q2.quarter}`);

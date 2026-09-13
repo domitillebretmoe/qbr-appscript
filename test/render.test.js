@@ -475,21 +475,25 @@ test('future quarters get Predicted Churn tables next to Renewals due', () => {
 
 test('rep activity & performance table spans the page with one linked row per rep', () => {
   const rep = (name, over) => Object.assign({ userId: name, name, url: `${SF}/lightning/r/User/${name}/view`, team: 'Europe Majors - DACH', monthsInSeat: 17.5,
-    accountsOwned: 34, repGoal: 25750000, fyWonArr: 3256460, attainmentPct: 3256460 / 25750000, coveragePct: 0.29, meetings30d: 62, activities30d: 197,
+    accountsOwned: 34, repGoal: 25750000, qWonArr: 1200000, fyWonArr: 3256460, attainmentPct: 3256460 / 25750000, coveragePct: 0.29, meetings: 62, activities: 197,
     activityCoveragePct: 4 / 34, pipelineCreatedArr: 615000, stalledArr: 60000, renewalRiskPct: null }, over);
-  const sheet = render(sampleView('Q3-2026', dach, dachAccounts, [], [rep('Anna Berger'), rep('Max Weber', { fyWonArr: 0, attainmentPct: 0, meetings30d: 0 })]));
+  const sheet = render(sampleView('Q3-2026', dach, dachAccounts, [], [rep('Anna Berger'), rep('Max Weber', { qWonArr: 0, fyWonArr: 0, attainmentPct: 0, meetings: 0 })]));
   const values = Object.values(sheet.cells).map(c => c.value);
   assert.ok(values.includes('REP ACTIVITY & PERFORMANCE'));
+  assert.ok(values.some(v => typeof v === 'string' && v.indexOf('Q3-2026 to date by opp owner') >= 0), 'subtitle says QTD while the quarter is open');
   const reps = tableRows(sheet, 'Reps (2)');
-  assert.deepEqual(reps.headers, ['Rep', 'Months in seat', 'Accts owned', 'Rep goal (FY)', 'Won ARR (FY)', 'Attainment', 'Coverage', 'Meetings (30d)',
-    'Activities (30d)', 'Acct coverage (30d)', 'Pipeline created (Q)', 'Stalled >60d', 'Renewal risk']);
+  assert.deepEqual(reps.headers, ['Rep', 'Months in seat', 'Accts owned', 'Rep goal (FY)', 'Won ARR (QTD)', 'Won ARR (FY)', 'Attainment (FY)', 'Meetings (QTD)',
+    'Activities (QTD)', 'Acct coverage (QTD)', 'Pipeline created (QTD)', 'Stalled >60d', 'Renewal risk (FY)']);
   assert.equal(reps.headers.length, 13, 'B..N');
   assert.equal(reps.rows[0][0].value, 'Anna Berger');
   assert.equal(reps.rows[0][0].link, `${SF}/lightning/r/User/Anna Berger/view`);
-  assert.equal(reps.rows[0][4].value, 3256460);
-  assert.equal(reps.rows[0][5].value, 3256460 / 25750000);
+  assert.equal(reps.rows[0][4].value, 1200000);
+  assert.equal(reps.rows[0][5].value, 3256460);
+  assert.equal(reps.rows[0][6].value, 3256460 / 25750000);
   assert.equal(reps.rows[1][7].value, 0);
   assert.equal(reps.rows[0][12].value, '');
+  const closed = tableRows(render(sampleView('Q2-2026', dach, dachAccounts, [], [rep('Anna Berger')])), 'Reps (1)');
+  assert.deepEqual(closed.headers.slice(4, 5).concat(closed.headers.slice(7, 11)), ['Won ARR (Q)', 'Meetings (Q)', 'Activities (Q)', 'Acct coverage (Q)', 'Pipeline created (Q)']);
   const empty = tableRows(render(sampleView('Q3-2026')), 'Reps (0)');
   assert.equal(empty.rows[0][0].value, '-');
 });
