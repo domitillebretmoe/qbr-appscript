@@ -3,11 +3,13 @@
 // Reps = active users with a User_Segment__c in a sales-carrying group whose Team matches the tab.
 // Attribution follows the dashboard: accounts owned, goals and activity coverage by Account.OwnerId; won ARR,
 // coverage, pipeline created, stalled pipeline and renewal risk by Opportunity.OwnerId; Gong-backed activity only.
+// Scoped to the tab's quarter: Won ARR, meetings, activities, account coverage and pipeline created cover the
+// selected quarter up to today (the whole quarter once it is closed); rep goals only exist per fiscal year in
+// Salesforce, so goal, FY Won ARR, attainment and coverage stay FY-level.
 // Simplifications vs the dashboard: meetings are credited to the event owner (no participant credit), deduped by
 // Gong activity id; no slippage rate (needs the weekly snapshots).
 const REP_GROUPS = ['US Majors', 'Europe', 'Asia', 'LATAM'];
 const REP_EXCLUDED_FAMILIES = ['Deployed Engineering', 'SDR', 'Pre-sales'];
-const REP_ACTIVITY_DAYS = 30;
 const REP_STALLED_DAYS = 60;
 const REP_RENEWAL_RECORD_TYPES = ['Support_Renewal', 'Fed_Renewal'];
 
@@ -19,7 +21,7 @@ function fetchRepPerformance(team, quarter, today) {
   const universe = sfBulk ? bulkCached('reps', () => queryReps(null)) : reps;
   const stats = bulkCached(`repStats:${quarter}`, () => queryRepStats(universe, quarter, today));
   return reps.map(rep => Object.assign({}, rep, repMetrics(rep, stats[rep.userId] || {}, today)))
-    .sort((a, b) => (b.fyWonArr || 0) - (a.fyWonArr || 0) || a.name.localeCompare(b.name));
+    .sort((a, b) => (b.qWonArr || 0) - (a.qWonArr || 0) || (b.fyWonArr || 0) - (a.fyWonArr || 0) || a.name.localeCompare(b.name));
 }
 
 function repMetrics(rep, s, today) {
@@ -31,12 +33,13 @@ function repMetrics(rep, s, today) {
     monthsInSeat: seat == null ? null : Math.round(seat * 10) / 10,
     accountsOwned,
     repGoal,
+    qWonArr: s.qWonArr || 0,
     fyWonArr: s.fyWonArr || 0,
     attainmentPct: ratio(s.fyWonArr || 0, repGoal),
     coverageArr: s.coverageArr || 0,
     coveragePct: ratio(s.coverageArr || 0, repGoal),
-    meetings30d: s.meetings || 0,
-    activities30d: s.activities || 0,
+    meetings: s.meetings || 0,
+    activities: s.activities || 0,
     coveredAccounts: s.coveredAccounts || 0,
     activityCoveragePct: ratio(s.coveredAccounts || 0, accountsOwned),
     pipelineCreatedArr: s.pipelineCreatedArr || 0,
@@ -79,6 +82,22 @@ function queryReps(team) {
   }));
 }
 
+// Salesforce team (User Segment, most recently modified first) keyed by user Id for the given opportunity owner Ids;
+// `ids` null = everyone.
+function fetchOwnerTeams(ids) {
+  if (ids && !ids.length) return {};
+  return sfBulk ? bulkCached('ownerTeams', () => queryOwnerTeams(null)) : queryOwnerTeams(ids);
+}
+
+function queryOwnerTeams(ids) {
+  const where = ids ? `WHERE User__c IN (${unique(ids).map(soqlLiteral).join(', ')})` : 'WHERE User__c != null';
+  const teams = {};
+  soql(`SELECT User__c, Team__r.Name FROM User_Segment__c ${where} ORDER BY LastModifiedDate DESC`).forEach(r => {
+    if (r.User__c && !(r.User__c in teams)) teams[r.User__c] = r.Team__r ? r.Team__r.Name : '';
+  });
+  return teams;
+}
+
 // Activity Gong still syncs onto a rep's retired duplicate user (inactive, same name, same email local-part) is
 // credited to the active rep.
 function queryRepAliases(reps) {
@@ -96,7 +115,8 @@ function queryRepAliases(reps) {
   return alias;
 }
 
-// Per-rep measures for the fiscal year of `quarter`; activity windows are the last REP_ACTIVITY_DAYS days as of today.
+// Per-rep measures: goal / coverage / renewal risk over the fiscal year of `quarter`, Won ARR for both the fiscal year
+// and the quarter, activity and pipeline created within the quarter up to `today`.
 function queryRepStats(reps, quarter, today) {
   const stats = {};
   const stat = id => stats[id] || (stats[id] = {});
@@ -123,9 +143,14 @@ function queryRepStats(reps, quarter, today) {
       if (isRep[owner]) stat(owner).repGoal = (stat(owner).repGoal || 0) + (g.Weighted_Goal__c || 0);
     });
 
-  soql(`SELECT OwnerId o, SUM(NACV__c) v FROM Opportunity
-        WHERE OwnerId IN ${idList} AND IsWon = true AND CloseDate >= ${fyStart} AND CloseDate <= ${fyEnd} GROUP BY OwnerId`)
-    .forEach(r => { stat(r.o).fyWonArr = r.v || 0; });
+  soql(`SELECT OwnerId, Type, IsWon, RecordType.Name, NACV__c, ARR__c, Amount, CloseDate FROM Opportunity
+        WHERE OwnerId IN ${idList} AND IsWon = true AND CloseDate >= ${fyStart} AND CloseDate <= ${fyEnd}`)
+    .forEach(o => {
+      const s = stat(o.OwnerId);
+      const v = deltaArrOf(o);
+      s.fyWonArr = (s.fyWonArr || 0) + v;
+      if (o.CloseDate >= qStart && o.CloseDate < qEnd) s.qWonArr = (s.qWonArr || 0) + v;
+    });
 
   soql(`SELECT OwnerId o, SUM(Expected_NACV__c) v FROM Opportunity
         WHERE OwnerId IN ${idList} AND (IsClosed = false OR IsWon = true) AND CloseDate >= ${fyStart} AND CloseDate <= ${fyEnd}
@@ -158,7 +183,7 @@ function queryRepStats(reps, quarter, today) {
     });
 
   const ownerList = `(${ids.concat(Object.keys(aliases)).map(soqlLiteral).join(', ')})`;
-  const window = `ActivityDate = LAST_N_DAYS:${REP_ACTIVITY_DAYS}`;
+  const window = `ActivityDate >= ${qStart} AND ActivityDate < ${qEnd} AND ActivityDate <= ${today}`;
   const covered = {};
   const touch = (ownerId, accountOwner, accountId) => {
     const rep = repOf(ownerId);
