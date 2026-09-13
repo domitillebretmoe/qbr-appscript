@@ -124,10 +124,12 @@ function fetchOpportunities(team, lastFiscalYear) {
   return bulkOrTeam(`opps:${lastFiscalYear}`, team, t => queryOpportunities(t, lastFiscalYear)).filter(o => teamMatches(o.team, team));
 }
 
-// Closed Won MSP deals book their annual value in ARR__c and leave Delta ARR (NACV__c) at 0, so Net Added ARR
-// counts their ARR (falling back to Amount) as the Delta ARR of the deal.
+// Closed Won MSP deals book their annual value in ARR__c and leave Delta ARR (NACV__c) at an explicit 0, so Net Added
+// ARR counts their ARR (falling back to Amount) as the Delta ARR of the deal. A blank NACV stays 0 (data-quality issue)
+// and renewals never take the fallback, whatever their Type.
 function usesArrAsDelta(r) {
-  return r.Type === 'MSP' && r.IsWon === true && !r.NACV__c;
+  return r.Type === 'MSP' && r.IsWon === true && r.NACV__c === 0
+    && RENEWAL_RECORD_TYPES.indexOf(r.RecordType ? r.RecordType.Name : '') < 0;
 }
 
 function deltaArrOf(r) {

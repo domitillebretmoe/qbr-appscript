@@ -82,12 +82,15 @@ test('queryOpportunities: a Closed Won MSP deal with NACV 0 takes its ARR (else 
     Object.assign({ Id: '5', Name: 'Renewal', Type: 'Renewal', Amount: 4980800, ARR__c: 4980800, NACV__c: 0 }, base),
     Object.assign({ Id: '6', Name: 'Lost MSP', Type: 'MSP', Amount: 100000, ARR__c: null, NACV__c: 0 }, base, { StageName: 'Closed Lost', IsWon: false }),
     Object.assign({ Id: '7', Name: 'Open MSP', Type: 'MSP', Amount: 500000, ARR__c: null, NACV__c: 0 }, base, { StageName: '1- Discovery', IsClosed: false, IsWon: false }),
+    Object.assign({ Id: '8', Name: 'MSP blank NACV', Type: 'MSP', Amount: 75000, ARR__c: 50000, NACV__c: null }, base),
+    Object.assign({ Id: '9', Name: 'MSP renewal', Type: 'MSP', Amount: 200000, ARR__c: 200000, NACV__c: 0 }, base, { RecordType: { Name: 'Renewal' } }),
+    Object.assign({ Id: '10', Name: 'MSP fed renewal', Type: 'MSP', Amount: 200000, ARR__c: 200000, NACV__c: 0 }, base, { RecordType: { Name: 'Fed - Renewal' } }),
   ];
   const { ctx, calls } = sfContext(() => page(records));
   const opps = ctx.queryOpportunities('Europe - DACH', 2027);
   assert.strictEqual(opps.map(o => [o.name, o.deltaArr, o.amount].join(':')).join('\n'), [
     'Siemens MSP:95520:95520', 'Ford MSP:547200:273600', 'MSP no ARR:16000:16000', 'MSP with NACV:189120:206400',
-    'Renewal:0:4980800', 'Lost MSP:0:100000', 'Open MSP:0:500000',
+    'Renewal:0:4980800', 'Lost MSP:0:100000', 'Open MSP:0:500000', 'MSP blank NACV:0:75000', 'MSP renewal:0:200000', 'MSP fed renewal:0:200000',
   ].join('\n'));
   assert.match(decodeURIComponent(calls[0].url), /Amount, ARR__c, NACV__c/);
 });
