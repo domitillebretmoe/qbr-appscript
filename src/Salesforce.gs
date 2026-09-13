@@ -124,10 +124,20 @@ function fetchOpportunities(team, lastFiscalYear) {
   return bulkOrTeam(`opps:${lastFiscalYear}`, team, t => queryOpportunities(t, lastFiscalYear)).filter(o => teamMatches(o.team, team));
 }
 
+// Closed Won MSP deals book their annual value in ARR__c and leave Delta ARR (NACV__c) at 0, so Net Added ARR
+// counts their ARR (falling back to Amount) as the Delta ARR of the deal.
+function usesArrAsDelta(r) {
+  return r.Type === 'MSP' && r.IsWon === true && !r.NACV__c;
+}
+
+function deltaArrOf(r) {
+  return usesArrAsDelta(r) ? (r.ARR__c || r.Amount || 0) : (r.NACV__c || 0);
+}
+
 function queryOpportunities(team, lastFiscalYear) {
   const query = `
     SELECT Id, Name, StageName, IsClosed, IsWon, Type, RecordType.Name, CloseDate, FiscalYear, FiscalQuarter,
-           Amount, NACV__c, Expected_NACV__c, Expected_Logo_Impact__c, Closed_Lost_Reason_List__c, Closed_Lost_Reason__c,
+           Amount, ARR__c, NACV__c, Expected_NACV__c, Expected_Logo_Impact__c, Closed_Lost_Reason_List__c, Closed_Lost_Reason__c,
            AccountId, Account.Name, Account.Team__r.Name, Account.Subteam__r.Name, Account.Major_Admin_Tag__c,
            Team__r.Name, Group__r.Name, Owner.Name
     FROM Opportunity
@@ -146,7 +156,7 @@ function queryOpportunities(team, lastFiscalYear) {
     recordType: r.RecordType ? r.RecordType.Name : '',
     closeDate: r.CloseDate,
     quarter: quarterLabel(r.FiscalQuarter, r.FiscalYear),
-    deltaArr: r.NACV__c || 0,
+    deltaArr: deltaArrOf(r),
     amount: r.Amount || 0,
     expectedDeltaArr: r.Expected_NACV__c || 0,
     expectedDeltaArrMissing: r.Expected_NACV__c == null,
