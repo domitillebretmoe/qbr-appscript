@@ -11,6 +11,7 @@ function mainContext(stubs) {
     Session: { getScriptTimeZone: () => 'UTC' },
     fetchRegionOnlyAccounts: () => [],
     fetchRepPerformance: () => [],
+    fetchOwnerTeams: () => ({}),
   }, stubs));
   ['Config.gs', 'Metrics.gs', 'Main.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
   return ctx;
@@ -39,7 +40,9 @@ const data = team => byTeam[team] || empty;
 test('Europe roll-up sums its member teams, keeps opportunities attributed to the sub-team, ledger = sum of member rows', () => {
   const fetched = [];
   const ledgerCalls = [];
+  let ownerIds = null;
   const ctx = mainContext({
+    fetchOwnerTeams: ids => { ownerIds = ids; return {}; },
     fetchOpportunities: team => { fetched.push(team); return data(team).opps; },
     fetchAccounts: team => data(team).accounts,
     fetchGoals: team => data(team).goals,
@@ -56,6 +59,7 @@ test('Europe roll-up sums its member teams, keeps opportunities attributed to th
   assert.deepEqual(fetched, ['Europe - Nordics', 'Europe - Benelux', 'Europe - UKI', 'Europe - DACH', 'Europe - South']);
   assert.ok(!fetched.includes('Europe'));
   assert.deepEqual(view.members, fetched);
+  assert.deepEqual(ownerIds, ['005AnnaBerger00000']);
   assert.deepEqual(view.opps.map(o => o.team).sort(), ['Europe - DACH', 'Europe - DACH', 'Europe - DACH', 'Europe - UKI', 'Europe - UKI']);
 
   const q3 = view.current;

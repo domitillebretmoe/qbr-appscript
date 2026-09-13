@@ -8,7 +8,7 @@ const ctx = vm.createContext({});
 ['Config.gs', 'Metrics.gs', 'Definitions.gs', 'Reps.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 const { quarterMetrics, forecastMetrics, accountMetrics, partnerMetrics, shiftQuarter, quarterOfDate, teamToken, quartersBetween,
   teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions, rollupMembers, withArr, withPace, quarterElapsed,
-  quarterStart, ownerMetrics, dataQualityIssues, statusText, repMetrics, daysBetween } = ctx;
+  quarterStart, ownerMetrics, ownerLabel, dataQualityIssues, statusText, repMetrics, daysBetween } = ctx;
 const ROLLUP_TEAMS = vm.runInContext('ROLLUP_TEAMS', ctx);
 const TEAMS = vm.runInContext('TEAMS', ctx);
 
@@ -281,9 +281,30 @@ test('owner table: net added, won count, churn and pipeline per opportunity owne
   ];
   const owners = ownerMetrics(rows, 'Q3-2026', 'Q4-2026');
   assert.deepEqual(owners.map(o => o.owner), ['Ben', 'Chris', 'Anna']);
-  assert.deepEqual(owners[0], { owner: 'Ben', netAddedArr: 80000, wonCount: 2, churnArr: -20000, openPipelineArr: 0, nextPipelineArr: 0 });
-  assert.deepEqual(owners[2], { owner: 'Anna', netAddedArr: -50000, wonCount: 0, churnArr: -50000, openPipelineArr: 70000, nextPipelineArr: 30000 });
+  assert.deepEqual(owners[0], { owner: 'Ben', team: '', own: true, netAddedArr: 80000, wonCount: 2, churnArr: -20000, openPipelineArr: 0, nextPipelineArr: 0 });
+  assert.deepEqual(owners[2], { owner: 'Anna', team: '', own: true, netAddedArr: -50000, wonCount: 0, churnArr: -50000, openPipelineArr: 70000, nextPipelineArr: 30000 });
   assert.equal(owners[1].nextPipelineArr, 5000);
+});
+
+test('owner table: owners with only Closed Lost pipeline are dropped, owners from another team are flagged', () => {
+  const rows = [
+    opp('Q3-2026', 'Closed Won', 'Siemens', 'MSP', 'Enterprise', 95520, 1, { owner: 'Kalle Harnos', ownerId: '005K' }),
+    opp('Q3-2026', 'Closed Lost', 'Deutsche Bank', 'Land', 'Enterprise', 0, 0, { owner: 'Berry Yirrell', ownerId: '005B' }),
+    opp('Q3-2026', 'Closed Lost', 'Adecco', 'Land', 'Enterprise', 0, 0, { owner: 'Claudia Hubert', ownerId: '005C' }),
+    opp('Q3-2026', 'Closed Won', 'Mercedes', 'Expand', 'Enterprise', 2912000, 0, { owner: 'Berry Yirrell', ownerId: '005B' }),
+    opp('Q3-2026', 'Closed Won', 'Serrala', 'Renewal', 'Renewal', 0, 0, { owner: 'Robin Werner', ownerId: '005R' }),
+    // a second, distinct Salesforce user with the same display name as Robin Werner
+    opp('Q4-2026', '1- Discovery', 'Erste', 'Land', 'Enterprise', 40000, 1, { owner: 'Robin Werner', ownerId: '005R2' }),
+  ];
+  const teams = { '005K': 'Europe Majors - DACH', '005B': 'Europe Majors - UKI', '005R': 'Europe - DACH', '005R2': 'Europe - UKI' };
+  const owners = ownerMetrics(rows, 'Q3-2026', 'Q4-2026', teams, ['Europe - DACH']);
+  assert.deepEqual(owners.map(ownerLabel), ['Berry Yirrell (Europe Majors - UKI)', 'Kalle Harnos', 'Robin Werner', 'Robin Werner (Europe - UKI)']);
+  assert.deepEqual(owners.map(o => o.own), [false, true, true, false]);
+  assert.deepEqual(owners.map(o => o.nextPipelineArr), [0, 0, 0, 40000]);
+  // no team map / no members: nobody is flagged, the zero-only owner is still dropped
+  assert.deepEqual(ownerMetrics(rows, 'Q3-2026', 'Q4-2026').map(ownerLabel), ['Berry Yirrell', 'Kalle Harnos', 'Robin Werner', 'Robin Werner']);
+  // unknown team (owner without a User Segment) counts as the tab's own
+  assert.equal(ownerLabel(ownerMetrics(rows, 'Q3-2026', 'Q4-2026', {}, ['Europe - DACH'])[0]), 'Berry Yirrell');
 });
 
 test('data quality: stale open opps, $0 Closed Won, missing Expected ARR, region-only accounts', () => {

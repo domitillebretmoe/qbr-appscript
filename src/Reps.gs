@@ -82,6 +82,22 @@ function queryReps(team) {
   }));
 }
 
+// Salesforce team (User Segment, most recently modified first) keyed by user Id for the given opportunity owner Ids;
+// `ids` null = everyone.
+function fetchOwnerTeams(ids) {
+  if (ids && !ids.length) return {};
+  return sfBulk ? bulkCached('ownerTeams', () => queryOwnerTeams(null)) : queryOwnerTeams(ids);
+}
+
+function queryOwnerTeams(ids) {
+  const where = ids ? `WHERE User__c IN (${unique(ids).map(soqlLiteral).join(', ')})` : 'WHERE User__c != null';
+  const teams = {};
+  soql(`SELECT User__c, Team__r.Name FROM User_Segment__c ${where} ORDER BY LastModifiedDate DESC`).forEach(r => {
+    if (r.User__c && !(r.User__c in teams)) teams[r.User__c] = r.Team__r ? r.Team__r.Name : '';
+  });
+  return teams;
+}
+
 // Activity Gong still syncs onto a rep's retired duplicate user (inactive, same name, same email local-part) is
 // credited to the active rep.
 function queryRepAliases(reps) {

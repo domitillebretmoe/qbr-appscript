@@ -9,12 +9,14 @@ let oppSeq = 0;
 
 const opp = (quarter, stage, account, type, recordType, deltaArr, logo, extra = {}) => {
   const id = `006${String(++oppSeq).padStart(15, '0')}`;
-  return Object.assign({
+  const o = Object.assign({
     quarter, stage, account, type, recordType, deltaArr, expectedLogoImpact: logo, isClosed: stage.startsWith('Closed'),
     expectedDeltaArr: 0, lostReason: '', major: false, oppTeam: 'Europe', oppGroup: 'Europe',
     id, url: `${SF}/lightning/r/Opportunity/${id}/view`, accountId: accountId(account), accountUrl: accountUrl(account),
     name: `${account} - ${type}`, closeDate: '', owner: 'Anna Berger', team: 'Europe - DACH',
   }, extra);
+  if (!('ownerId' in o)) o.ownerId = `005${slug(o.owner)}`;
+  return o;
 };
 const dach = [
   opp('Q1-2026', 'Closed Won', 'CompuGroup', 'One Time', 'Enterprise', 0, 0, { closeDate: '2025-02-14' }),

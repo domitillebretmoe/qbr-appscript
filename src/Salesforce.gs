@@ -141,7 +141,7 @@ function queryOpportunities(team, lastFiscalYear) {
     SELECT Id, Name, StageName, IsClosed, IsWon, Type, RecordType.Name, CloseDate, FiscalYear, FiscalQuarter,
            Amount, ARR__c, NACV__c, Expected_NACV__c, Expected_Logo_Impact__c, Closed_Lost_Reason_List__c, Closed_Lost_Reason__c,
            AccountId, Account.Name, Account.Team__r.Name, Account.Subteam__r.Name, Account.Major_Admin_Tag__c,
-           Team__r.Name, Group__r.Name, Owner.Name
+           Team__r.Name, Group__r.Name, OwnerId, Owner.Name
     FROM Opportunity
     WHERE ${teamClause(['Account.Team__r.Name', 'Account.Subteam__r.Name', 'Team__r.Name'], team)}
       AND Account.Name != 'Test'
@@ -172,6 +172,7 @@ function queryOpportunities(team, lastFiscalYear) {
     major: r.Account.Major_Admin_Tag__c === true,
     oppTeam: r.Team__r ? r.Team__r.Name : '',
     oppGroup: r.Group__r ? r.Group__r.Name : '',
+    ownerId: r.OwnerId || '',
     owner: r.Owner ? r.Owner.Name : '',
   }));
 }

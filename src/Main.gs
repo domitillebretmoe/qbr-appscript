@@ -181,6 +181,7 @@ function buildView(team, quarter) {
   const lastFy = parseQuarter(shiftQuarter(quarter, 2)).fy;
   const members = rollupMembers(team) || [team];
   const oppsByMember = members.map(member => fetchOpportunities(member, lastFy));
+  const opps = [].concat(...oppsByMember);
   const quarters = quartersBetween(FIRST_QUARTER, quarter);
   const ledgers = members.map((member, i) => {
     const netAddedByQuarter = {};
@@ -191,12 +192,13 @@ function buildView(team, quarter) {
     team,
     members,
     quarter,
-    opps: [].concat(...oppsByMember),
+    opps,
     accounts: [].concat(...members.map(fetchAccounts)),
     goals: sumGoals(members.map(fetchGoals)),
     ledgers,
     unassignedAccounts: fetchRegionOnlyAccounts(team),
     reps: fetchRepPerformance(team, quarter, todayIso()),
+    ownerTeams: fetchOwnerTeams(unique(opps.map(o => o.ownerId).filter(Boolean))),
     today: todayIso(),
   });
 }
