@@ -242,9 +242,11 @@ test('future quarters list predicted churn: renewals with a negative Expected De
 
 test('rep metrics: ratios against goal / owned accounts, months in seat, nulls when there is no denominator', () => {
   const rep = { userId: 'u1', name: 'Berry', createdDate: '2025-03-26' };
-  const m = repMetrics(rep, { accountsOwned: 34, repGoal: 25750000, fyWonArr: 3256460, coverageArr: 7441460, meetings: 62, activities: 197,
+  const m = repMetrics(rep, { accountsOwned: 34, repGoal: 25750000, qWonArr: 1200000, fyWonArr: 3256460, coverageArr: 7441460, meetings: 62, activities: 197,
     coveredAccounts: 4, pipelineCreatedArr: 615000, pipelineCreatedCount: 3, stalledArr: 60000, stalledCount: 1 }, '2026-09-11');
   assert.equal(m.monthsInSeat, 17.5);
+  assert.equal(m.qWonArr, 1200000);
+  assert.equal(m.fyWonArr, 3256460);
   assert.equal(m.attainmentPct, 3256460 / 25750000);
   assert.equal(m.coveragePct, 7441460 / 25750000);
   assert.equal(m.activityCoveragePct, 4 / 34);
@@ -252,7 +254,8 @@ test('rep metrics: ratios against goal / owned accounts, months in seat, nulls w
   const fresh = repMetrics({ userId: 'u2', name: 'New', createdDate: null }, {}, '2026-09-11');
   assert.equal(fresh.monthsInSeat, null);
   assert.equal(fresh.attainmentPct, null);
-  assert.equal(fresh.meetings30d, 0);
+  assert.equal(fresh.meetings, 0);
+  assert.equal(fresh.qWonArr, 0);
   assert.equal(daysBetween('2026-08-01', '2026-09-11'), 41);
 });
 
@@ -309,7 +312,7 @@ test('definitions tab covers every block of a team tab', () => {
   rows.forEach(row => assert.equal(row.length, 4, JSON.stringify(row)));
   const metrics = rows.map(r => r[1]).join(' | ');
   ['Net Added ARR', 'Downgrade', 'Full churn', 'Starting ARR', 'Ending ARR', 'Renewal rate', 'Logo attainment', 'Net Forecast',
-    'Pipeline', 'Active customers', 'Partner', 'Predicted Churn (tables)', 'Reps (table)', 'Meetings (30d)', 'Renewal risk']
+    'Pipeline', 'Active customers', 'Partner', 'Predicted Churn (tables)', 'Reps (table)', 'Meetings (Q / QTD)', 'Won ARR (Q / QTD)', 'Renewal risk (FY)']
     .forEach(name => assert.ok(metrics.indexOf(name) >= 0, name));
   assert.ok(rows.some(r => r[2].indexOf('Christian Lawless') >= 0));
   assert.ok(rows.some(r => r[2].indexOf('"Renewal" or "Fed - Renewal"') >= 0));
