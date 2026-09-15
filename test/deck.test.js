@@ -132,13 +132,18 @@ test('fillDeck replaces every token, resizes and fills tables, keeps manual colu
   assert.equal(deck.slides[3].shapes[0].textRange.text, 'What worked and why - Sales leadership fills this in');
 });
 
-test('a shape tagged qbr:fontSize gets its intended size back once the token is a value', () => {
+test('a {{size:N}} marker restores the intended font size and is removed, RAG pill included', () => {
   const deck = new FakePresentation();
   const slide = deck.slide();
-  const kpi = slide.shape('{{netAddedArr}}', null, 'qbr:fontSize=24');
+  const kpi = slide.shape('{{netAddedArr}}{{size:24}}');
+  const pill = slide.shape('{{rag.attainment}}{{size:7}}');
   const plain = slide.shape('{{quarter}}');
   ctx.fillDeck(deck, sampleView(), []);
   assert.equal(kpi.textRange.fontSize, 24);
+  assert.ok(!kpi.textRange.text.includes('{{'), kpi.textRange.text);
+  assert.equal(pill.textRange.fontSize, 7);
+  assert.ok(['ON / ABOVE PLAN', 'WATCH', 'BEHIND'].includes(pill.textRange.text));
+  assert.ok(pill.fill);
   assert.equal(plain.textRange.fontSize, null);
 });
 

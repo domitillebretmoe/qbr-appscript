@@ -8,8 +8,12 @@ are the placeholders to replace; grey italic text is guidance to delete. Speaker
     pip install -r tools/requirements.txt
     python3 tools/build_qbr_deck.py out/QBR_Deck_Template.pptx
 """
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -96,8 +100,10 @@ def text(slide, x, y, w, h, runs, size=11, color=TEXT, bold=False, font=FONT, al
     tf.word_wrap = True
     tf.margin_left = tf.margin_right = Inches(0.04)
     tf.margin_top = tf.margin_bottom = Inches(0.02)
+    intended = None
     if fit and isinstance(runs, str):
-        size = fit_font(box, runs, size, w, h, lines=fit if isinstance(fit, int) and not isinstance(fit, bool) else 1)
+        size, intended = fit_font(box, runs, size, w, h,
+                                  lines=fit if isinstance(fit, int) and not isinstance(fit, bool) else 1)
     tf.vertical_anchor = anchor
     paragraphs = [runs] if isinstance(runs, str) else runs
     for i, para in enumerate(paragraphs):
@@ -115,14 +121,16 @@ def text(slide, x, y, w, h, runs, size=11, color=TEXT, bold=False, font=FONT, al
             f.bold = over.get("bold", bold)
             f.italic = over.get("italic", italic)
             f.color.rgb = over.get("color", color)
+    if intended:
+        size_marker(p, intended, color)
     return box
 
 
-FONT_SIZE_TAG = "qbr:fontSize="  # shape description, read by Deck.gs restoreFontSize()
+FONT_SIZE_TAG = "{{size:"  # {{size:24}} marker run, read by Deck.gs restoreFontSize()
 
 
 def fit_font(shape, s, size, w, h, lines=1):
-    """Font size (pt) at which `s` fits the box on `lines` lines; tags the shape with the intended size if reduced.
+    """(font size at which `s` fits the box on `lines` lines, intended size or None if nothing was reduced).
     No autofit XML: Google Slides import is picky about it, so the template carries a plain smaller size."""
     tf = shape.text_frame
     usable_w = (w - tf.margin_left - tf.margin_right) / 12700
@@ -130,9 +138,16 @@ def fit_font(shape, s, size, w, h, lines=1):
     per_line = max(1, len(s) / lines)
     scale = min(1.0, usable_w / (0.7 * per_line * size), usable_h / (1.25 * lines * size))
     if scale >= 1:
-        return size
-    shape._element.nvSpPr.cNvPr.set("descr", f"{FONT_SIZE_TAG}{size:g}")
-    return max(6, round(size * scale * 2) / 2)
+        return size, None
+    return max(6, round(size * scale * 2) / 2), size
+
+
+def size_marker(paragraph, intended, color):
+    """Trailing 1pt {{size:N}} run: Deck.gs sets the shape's text to N pt and removes the marker. Carried in the text
+    (not alt text / shape name) because that is the only thing every importer keeps."""
+    r = paragraph.add_run()
+    r.text = f"{FONT_SIZE_TAG}{intended:g}" + "}}"
+    r.font.size, r.font.color.rgb = Pt(1), color
 
 
 def rect(slide, x, y, w, h, fill=PANEL, line=None, shape=MSO_SHAPE.RECTANGLE, dash=False):
@@ -166,10 +181,13 @@ def pill(slide, x, y, label, fill, color, w=None, size=8.5):
     p.alignment = PP_ALIGN.CENTER
     r = p.add_run()
     r.text = label
+    intended = None
     if "{{" in label:
         tf.word_wrap = True
-        size = fit_font(s, label, size, w, Inches(0.26))
+        size, intended = fit_font(s, label, size, w, Inches(0.26))
     r.font.name, r.font.size, r.font.bold, r.font.color.rgb = MONO, Pt(size), True, color
+    if intended:
+        size_marker(p, intended, color)
     return s
 
 
@@ -884,6 +902,21 @@ guidance(s, MX, CONTENT_TOP + Inches(3.1), CONTENT_W, Inches(0.5),
 notes(s, "Filled from the 'Data quality' table (OWNERS & DATA QUALITY section); 'Fix by' is the only manual column. Rows "
          "here explain why a number may move on the next refresh (e.g. a Closed Won opp with no Delta ARR).")
 
+def normalise_with_libreoffice(path):
+    """Re-save the deck through LibreOffice: python-pptx output is valid but Google Slides refuses to open it, while the
+    LibreOffice-written package imports cleanly. Skipped (with a warning) when soffice is not installed."""
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        print("warning: soffice not found - file left as written by python-pptx (Google Slides may not open it)")
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run([soffice, "--headless", "--convert-to", "pptx", "--outdir", tmp, path],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        shutil.move(os.path.join(tmp, os.path.basename(path)), path)
+    return True
+
+
 out = sys.argv[1] if len(sys.argv) > 1 else "QBR_Deck_Template.pptx"
 prs.save(out)
-print(f"{out}: {len(prs.slides)} slides")
+normalised = "--raw" not in sys.argv[2:] and normalise_with_libreoffice(out)
+print(f"{out}: {len(prs.slides)} slides{' (LibreOffice-normalised)' if normalised else ''}")

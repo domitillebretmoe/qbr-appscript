@@ -107,12 +107,16 @@ and Engineering leadership each get a look-back and a look-ahead commentary slid
 
 ```sh
 pip install -r tools/requirements.txt
-python3 tools/build_qbr_deck.py QBR_Deck_Template.pptx
+python3 tools/build_qbr_deck.py QBR_Deck_Template.pptx   # add --raw to skip the LibreOffice pass
 ```
+
+The file is re-saved through LibreOffice (`soffice`) when it is installed: Google Slides refuses to open the package as
+python-pptx writes it but imports the LibreOffice-written one, so ship the normalised file.
 
 The template is machine-fillable: `{{token}}` placeholders (`{{team}}`, `{{netAddedArr}}`, `{{f1.netForecastArr}}`,
 `{{qoq.grr}}`, `{{rag.attainment}}`...), a `{{rows:name}}` marker in the first data cell of each table, and `{{chart:title}}`
-in the dashed chart frames. Square-bracket text and grey italics are commentary to write or delete.
+in the dashed chart frames; a trailing 1pt `{{size:N}}` marks text drawn smaller than intended so the long token fits
+(Build deck restores N pt and drops the marker). Square-bracket text and grey italics are commentary to write or delete.
 
 ### Build a deck from the cockpit (Google Slides)
 

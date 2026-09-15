@@ -16,16 +16,14 @@ class FakeText {
 }
 
 class FakeShape {
-  constructor(slide, text, box, description) {
+  constructor(slide, text, box) {
     this.slide = slide;
     this.textRange = new FakeText(text);
     this.box = box || { left: 10, top: 20, width: 300, height: 200 };
-    this.description = description || '';
     this.fill = null;
     this.removed = false;
   }
   getText() { return this.textRange; }
-  getDescription() { return this.description; }
   getLeft() { return this.box.left; }
   getTop() { return this.box.top; }
   getWidth() { return this.box.width; }
@@ -46,7 +44,7 @@ class FakeTable {
 
 class FakeSlide {
   constructor() { this.shapes = []; this.tables = []; this.charts = []; }
-  shape(text, box, description) { const s = new FakeShape(this, text, box, description); this.shapes.push(s); return s; }
+  shape(text, box) { const s = new FakeShape(this, text, box); this.shapes.push(s); return s; }
   table(rows) { const t = new FakeTable(rows); this.tables.push(t); return t; }
   getShapes() { return this.shapes.slice(); }
   getTables() { return this.tables.slice(); }
