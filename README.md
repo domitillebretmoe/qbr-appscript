@@ -99,6 +99,19 @@ python3 tools/preview-xlsx.py /tmp/preview.json preview.xlsx   # needs openpyxl
 
 Sparklines, the percentage gradient and charts are approximated in Excel; everything else is what `Render.gs` draws.
 
+### QBR deck template (.pptx)
+
+A 25-slide PowerPoint template that narrates the cockpit: every quantitative slide's footer names the team-tab block or table
+it is filled from, the status pill mirrors the tab banner (FORECAST while the quarter is open, ACTUALS once closed), and Sales
+and Engineering leadership each get a look-back and a look-ahead commentary slide plus a shared asks / decisions table.
+
+```sh
+python3 tools/build_qbr_deck.py QBR_Deck_Template.pptx   # needs python-pptx
+```
+
+Square-bracket tokens (`[TEAM]`, `[Qx-FYyy]`, `$X.XM`, `NN%`) are the values to fill, grey italic text is guidance to delete,
+and dashed frames mark where to link a chart from the cockpit (Google Slides: Insert > Chart > From Sheets).
+
 ## Reconciliation against the FY27 QBR Cockpit workbook
 
 Replaying the exact queries in `Salesforce.gs` against the org reproduces the workbook's Q1-2026 and Q2-2026 Net Added ARR
