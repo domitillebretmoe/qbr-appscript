@@ -147,7 +147,9 @@ function queryOpportunities(team, lastFiscalYear) {
     WHERE ${teamClause(['Account.Team__r.Name', 'Account.Subteam__r.Name', 'Team__r.Name'], team)}
       AND Account.Name != 'Test'
       ${ownerClause()}
-      AND FiscalYear >= ${parseQuarter(FIRST_QUARTER).fy} AND FiscalYear <= ${lastFiscalYear}`;
+      AND ((FiscalYear >= ${parseQuarter(FIRST_QUARTER).fy} AND FiscalYear <= ${lastFiscalYear})
+           OR (IsClosed = false AND StageName = ${soqlLiteral(PILOT_STAGE)})
+           OR (Pilot_Status__c = ${soqlLiteral(PILOT_COMPLETE_STATUS)} AND Pilot_Actual_End_Date__c >= ${quarterStart(FIRST_QUARTER)}))`;
   return soql(query).map(r => ({
     id: r.Id,
     url: recordUrl('Opportunity', r.Id),

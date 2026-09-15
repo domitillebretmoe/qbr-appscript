@@ -171,10 +171,10 @@ function pilotMetrics(opps, quarter, selected, asOf) {
 }
 
 // Account counts are as of the refresh (Salesforce has no per-quarter account history).
-function accountMetrics(accounts, opps, quarter) {
+function accountMetrics(accounts, opps, quarter, asOf) {
   const active = accounts.filter(a => a.currentArr > 0);
   const activated = accounts.filter(a => a.currentArr <= 0 && a.hasOpenOpp);
-  const wonLands = inQuarter(opps, quarter).filter(o => isWon(o) && isNewLogo(o));
+  const wonLands = closedBy(inQuarter(opps, quarter), asOf).filter(o => isWon(o) && isNewLogo(o));
   return {
     activeCustomers: active.length,
     majorCustomers: active.filter(a => a.major).length,
@@ -300,7 +300,7 @@ function composeView({ team, members, quarter, opps, accounts, goals, ledgers, u
     };
   });
   const metricsFor = (q, asOf) => withPace(withArr(
-    Object.assign(quarterMetrics(opps, q, goalFor(q), asOf), accountMetrics(accounts, opps, q), partnerMetrics(opps, q, asOf),
+    Object.assign(quarterMetrics(opps, q, goalFor(q), asOf), accountMetrics(accounts, opps, q, asOf), partnerMetrics(opps, q, asOf),
       pilotMetrics(opps, q, q === quarter, asOf), { pipelineByStage: pipelineByStage(inQuarter(opps, q)) }), ledger[q]), asOf || today);
   const trend = quarters.map(q => metricsFor(q));
   const current = trend[trend.length - 1];

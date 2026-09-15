@@ -127,3 +127,27 @@ test('queryRepStats: Won ARR split FY vs selected quarter (MSP fallback applied)
   assert.ok(queries.every(q => !q.includes('LAST_N_DAYS')));
   assert.ok(queries.some(q => q.includes('CreatedDate >= 2026-08-01T00:00:00Z AND CreatedDate < 2026-11-01T00:00:00Z')));
 });
+
+test('queryOpportunities: pilots are fetched whatever their close date (open Tech Validation, or completed since the first quarter)', () => {
+  const { ctx, calls } = sfContext(() => page([]));
+  ctx.queryOpportunities('Europe - DACH', 2027);
+  const q = decodeURIComponent(calls[0].url).replace(/\s+/g, ' ');
+  assert.match(q, /\(\(FiscalYear >= 2026 AND FiscalYear <= 2027\) OR \(IsClosed = false AND StageName = '3- Tech Validation'\) OR \(Pilot_Status__c = 'Complete' AND Pilot_Actual_End_Date__c >= 2026-02-01\)\)/);
+});
+
+test('fetchRepPerformance: a user\'s most recent segment decides the team, whichever tab is refreshed', () => {
+  const segment = (user, team, modified) => ({ User__c: user, User__r: { Name: user, Email: `${user}@x.com`, CreatedDate: '2025-01-01T00:00:00Z', User_Family__c: 'AE' },
+    Group__r: { Name: 'Europe' }, Team__r: { Name: team }, LastModifiedDate: modified });
+  const { ctx, calls } = sfContext(url => {
+    const q = decodeURIComponent(url.split('?q=')[1] || '').replace(/\s+/g, ' ');
+    if (q.includes('FROM User_Segment__c')) {
+      // Newest first, as the ORDER BY returns them: Priya moved from DACH to UKI.
+      return page([segment('priya', 'Europe Majors - UKI', '2026-08-01'), segment('kalle', 'Europe Majors - DACH', '2026-03-01'), segment('priya', 'Europe Majors - DACH', '2026-01-01')]);
+    }
+    return page([]);
+  });
+  assert.deepEqual(ctx.fetchRepPerformance('Europe - DACH', 'Q3-2026', '2026-09-12').map(r => r.name), ['kalle']);
+  assert.deepEqual(ctx.fetchRepPerformance('Europe - UKI', 'Q3-2026', '2026-09-12').map(r => r.name), ['priya']);
+  const segmentQueries = calls.map(c => decodeURIComponent(c.url)).filter(u => u.includes('FROM User_Segment__c') && u.includes('Group__r.Name IN'));
+  assert.ok(segmentQueries.every(u => u.includes('WHERE Id != null')), 'no per-team pre-filter');
+});

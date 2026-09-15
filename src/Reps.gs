@@ -13,13 +13,14 @@ const REP_EXCLUDED_FAMILIES = ['Deployed Engineering', 'SDR', 'Pre-sales'];
 const REP_STALLED_DAYS = 60;
 const REP_RENEWAL_RECORD_TYPES = ['Support_Renewal', 'Fed_Renewal'];
 
-// One row per rep of `team` (all member teams for a roll-up), best FY attainment first.
+// One row per rep of `team` (all member teams for a roll-up), best quarter Won ARR first. Reps are always taken
+// from every team's segments so that a user's current (most recent) segment decides the team, whichever tab refreshes.
 function fetchRepPerformance(team, quarter, today) {
   const members = rollupMembers(team) || [team];
-  const reps = bulkOrTeam('reps', team, queryReps).filter(r => members.some(m => teamMatches(r.team, m)));
+  const universe = bulkCached('reps', () => queryReps(null));
+  const reps = universe.filter(r => members.some(m => teamMatches(r.team, m)));
   if (!reps.length) return [];
-  const universe = sfBulk ? bulkCached('reps', () => queryReps(null)) : reps;
-  const stats = bulkCached(`repStats:${quarter}`, () => queryRepStats(universe, quarter, today));
+  const stats = bulkCached(`repStats:${quarter}`, () => queryRepStats(sfBulk ? universe : reps, quarter, today));
   return reps.map(rep => Object.assign({}, rep, repMetrics(rep, stats[rep.userId] || {}, today)))
     .sort((a, b) => (b.qWonArr || 0) - (a.qWonArr || 0) || (b.fyWonArr || 0) - (a.fyWonArr || 0) || a.name.localeCompare(b.name));
 }
