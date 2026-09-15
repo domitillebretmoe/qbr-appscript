@@ -302,6 +302,7 @@ function renderTeamTab(sheet, view) {
   row = writeSection(sheet, row, 'CHARTS', `${view.quarter} bridge, attainment, renewals, forecast and trend since ${FIRST_QUARTER}`);
   const lastRow = writeCharts(sheet, row, view, trend);
   writePdfLink(sheet, lastRow);
+  writeDeckLink(sheet, view.team, view.quarter);
 }
 
 // One-click PDF of the dashboard area (landscape, fit to width, no gridlines) through the Sheets export endpoint;

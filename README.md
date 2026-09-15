@@ -99,6 +99,35 @@ python3 tools/preview-xlsx.py /tmp/preview.json preview.xlsx   # needs openpyxl
 
 Sparklines, the percentage gradient and charts are approximated in Excel; everything else is what `Render.gs` draws.
 
+### QBR deck template (.pptx)
+
+A 25-slide PowerPoint template that narrates the cockpit: every quantitative slide's footer names the team-tab block or table
+it is filled from, the status pill mirrors the tab banner (FORECAST while the quarter is open, ACTUALS once closed), and Sales
+and Engineering leadership each get a look-back and a look-ahead commentary slide plus a shared asks / decisions table.
+
+```sh
+pip install -r tools/requirements.txt
+python3 tools/build_qbr_deck.py QBR_Deck_Template.pptx   # add --raw to skip the LibreOffice pass
+```
+
+The file is re-saved through LibreOffice (`soffice`) when it is installed: Google Slides refuses to open the package as
+python-pptx writes it but imports the LibreOffice-written one, so ship the normalised file.
+
+The template is machine-fillable: `{{token}}` placeholders (`{{team}}`, `{{netAddedArr}}`, `{{f1.netForecastArr}}`,
+`{{qoq.grr}}`, `{{rag.attainment}}`...), a `{{rows:name}}` marker in the first data cell of each table, and `{{chart:title}}`
+in the dashed chart frames; a trailing 1pt `{{size:N}}` marks text drawn smaller than intended so the long token fits
+(Build deck restores N pt and drops the marker). Square-bracket text and grey italics are commentary to write or delete.
+
+### Build a deck from the cockpit (Google Slides)
+
+Import the .pptx once into a native Google Slides file (File > Import slides, or set it via **QBR > Set deck template...**;
+the default template ID is in `Deck.gs`). Then on any team tab: **QBR > Build deck (this tab)** refreshes the tab, creates
+`<team> <quarter> QBR (forecast|actuals, cockpit <date>)` in your Drive from the template, replaces every token from the tab's metrics (actuals vs
+forecast, same-point QoQ, Land vs Land + MSP, TCV vs Delta ARR, account-level attribution unchanged), fills the tables
+(resized to the data, Salesforce links kept, manual commentary columns left as guidance), inserts the cockpit charts linked
+to the sheet, and writes the deck link into M1 of the tab (remembered per team / quarter across refreshes). Requires the
+`presentations` OAuth scope in `appsscript.json`.
+
 ## Reconciliation against the FY27 QBR Cockpit workbook
 
 Replaying the exact queries in `Salesforce.gs` against the org reproduces the workbook's Q1-2026 and Q2-2026 Net Added ARR
