@@ -9,6 +9,9 @@ function onOpen() {
     .addItem('Point all team tabs at the current quarter', 'resetTabsToCurrentQuarter')
     .addItem('Refresh on B1/B2 edit (install trigger)', 'installEditTrigger')
     .addSeparator()
+    .addItem('Build deck (this tab)', 'buildDeckForActiveTab')
+    .addItem('Set deck template...', 'setDeckTemplate')
+    .addSeparator()
     .addItem('Set Salesforce credentials...', 'setSalesforceCredentials')
     .addToUi();
 }
@@ -104,6 +107,7 @@ function refreshTab(sheet) {
   writeRawData(team, view.opps);
   writeGoals(team, view.goals);
   renderTeamTab(sheet, view);
+  return view;
 }
 
 // Installable trigger target: re-renders a team tab when B1 or B2 changes (including a paste over B1:B2).
