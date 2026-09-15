@@ -78,6 +78,23 @@ test('tokens carry the tab metrics, formatted, with forecast and QoQ variants', 
   assert.ok(t['qoq.netAddedArr'] !== undefined);
 });
 
+test('reps on pace compare FY attainment with the fiscal year elapsed, not the quarter', () => {
+  assert.equal(Math.round(ctx.fiscalYearElapsed('Q3-2026', TODAY) * 1000) / 1000, Math.round((226 / 365) * 1000) / 1000); // 1 Feb -> 15 Sep
+  assert.equal(ctx.fiscalYearElapsed('Q2-2025', TODAY), 1);
+  const view = sampleView('Q2-2026'); // closed quarter: quarterElapsedPct = 1
+  view.reps.push(Object.assign({}, view.reps[0], { name: 'Ahead Rep', attainmentPct: 0.7 }));
+  assert.equal(ctx.deckTokens(view).repsOnPace, '1');
+});
+
+test('stage total shows no share when there is no positive open pipeline', () => {
+  const withStages = stages => ctx.deckRows(Object.assign({}, sampleView(), { future: sampleView().future.map(f => Object.assign({}, f, { pipelineByStage: stages })) })).stagesQ1;
+  assert.deepEqual(withStages([]), [['Total open', '0', '$0', '-']]);
+  const negative = withStages([{ stage: 'R2- Renewal Engagement', count: 1, deltaArr: -25000, share: null }]);
+  assert.equal(negative[negative.length - 1][3], '-');
+  const positive = withStages([{ stage: '4- Proposal', count: 2, deltaArr: 500000, share: 1 }]);
+  assert.equal(positive[positive.length - 1][3], '100%');
+});
+
 test('fillDeck replaces every token, resizes and fills tables, keeps manual columns and commentary', () => {
   const view = sampleView();
   const deck = templateDeck();
@@ -128,6 +145,9 @@ test('deck link is remembered per team / quarter and rewritten by renderTeamTab'
   const view = sampleView();
   ctx.rememberDeckLink('Europe - DACH', 'Q3-2026', 'https://docs.google.com/presentation/d/abc/edit', view.today);
   assert.equal(ctx.deckLinkFor('Europe - DACH', 'Q2-2026'), null);
+  ctx.rememberDeckLink('Europe Majors - UKI', 'Q3-2026', 'https://docs.google.com/presentation/d/uki/edit', view.today);
+  assert.equal(ctx.deckLinkFor('Europe - DACH', 'Q3-2026').url, 'https://docs.google.com/presentation/d/abc/edit');
+  assert.equal(env.PropertiesService.getDocumentProperties().getProperty('QBR_DECK_LINKS'), null); // one property per team / quarter
   const sheet = new FakeSheet('Europe - DACH');
   ctx.writeDeckLink(sheet, 'Europe - DACH', 'Q3-2026');
   assert.equal(sheet.cell(1, 13).link, 'https://docs.google.com/presentation/d/abc/edit');

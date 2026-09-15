@@ -157,6 +157,13 @@ function ragLabel(value) {
   return RAG_LABELS[value >= RAG.green ? 'green' : value >= RAG.amber ? 'amber' : 'red'].text;
 }
 
+// Share of the selected quarter's fiscal year elapsed on `today` (rep goals and attainment are FY figures).
+function fiscalYearElapsed(quarter, today) {
+  const fy = parseQuarter(quarter).fy;
+  const start = quarterStart(`Q1-${fy}`);
+  return Math.min(1, Math.max(0, daysBetween(start, today) / daysBetween(start, quarterStart(`Q1-${fy + 1}`))));
+}
+
 // ---------------------------------------------------------------- values
 const fmtMoney = v => (v == null ? '-' : formatMoney(v));
 const fmtPct = (v, decimals) => (v == null ? '-' : `${(v * 100).toFixed(decimals || 0)}%`);
@@ -253,7 +260,7 @@ function deckTokens(view) {
     'rag.f1.netForecastPct': ragLabel(f1.netForecastPct),
     // Rep summary.
     repCount: fmtInt(view.reps.length),
-    repsOnPace: fmtInt(view.reps.filter(r => r.attainmentPct != null && r.attainmentPct >= (m.quarterElapsedPct || 0)).length),
+    repsOnPace: fmtInt(view.reps.filter(r => r.attainmentPct != null && r.attainmentPct >= fiscalYearElapsed(view.quarter, view.today)).length),
   };
   // QoQ column, same wording as the tab (arrow + delta; '-' without a like-for-like baseline).
   [['netAddedArr', 'money'], ['attainment', 'pct'], ['pace', 'pct'], ['logosWonLand', 'int'], ['logosWonMajors', 'int'],
@@ -331,7 +338,7 @@ function deckRows(view) {
     m.activePilotList.map(o => [acct(o), `Active${o.pilotStatus ? ` (${o.pilotStatus})` : ''}`, fmtDate(o.pilotExpectedEnd || o.closeDate), fmtMoney(o.deltaArr), null]),
   );
   const stageRows = stages => stages.map(s => [s.stage, fmtInt(s.count), fmtMoney(s.deltaArr), fmtPct(s.share)])
-    .concat([['Total open', fmtInt(sum(stages, 'count')), fmtMoney(sum(stages, 'deltaArr')), stages.length ? '100%' : '-']]);
+    .concat([['Total open', fmtInt(sum(stages, 'count')), fmtMoney(sum(stages, 'deltaArr')), sum(stages, 'deltaArr') > 0 ? '100%' : '-']]);
   const topDeals = f => f.topDeals.map(o => [acct(o), o.stage || '-', fmtDate(o.closeDate), fmtMoney(o.deltaArr), null]);
   const atRisk = f => f.predictedChurn.map(o => [acct(o), fmtDate(o.closeDate), fmtMoney(o.accountArr), fmtMoney(o.expectedDeltaArr), null, null]);
   return {
@@ -358,16 +365,14 @@ function deckRows(view) {
 }
 
 // ---------------------------------------------------------------- deck links on the tab
+// One property per team / quarter, so concurrent builds never overwrite each other's link.
 function rememberDeckLink(team, quarter, url, built) {
-  const props = PropertiesService.getDocumentProperties();
-  const links = JSON.parse(props.getProperty(DECK_LINKS_KEY) || '{}');
-  links[`${team}|${quarter}`] = { url, built };
-  props.setProperty(DECK_LINKS_KEY, JSON.stringify(links));
+  PropertiesService.getDocumentProperties().setProperty(`${DECK_LINKS_KEY}:${team}|${quarter}`, JSON.stringify({ url, built }));
 }
 
 function deckLinkFor(team, quarter) {
-  const links = JSON.parse(PropertiesService.getDocumentProperties().getProperty(DECK_LINKS_KEY) || '{}');
-  return links[`${team}|${quarter}`] || null;
+  const raw = PropertiesService.getDocumentProperties().getProperty(`${DECK_LINKS_KEY}:${team}|${quarter}`);
+  return raw ? JSON.parse(raw) : null;
 }
 
 // M1:N1, next to the PDF link in M2:N2 (resetSheet clears the tab, so renderTeamTab calls this on every refresh).
