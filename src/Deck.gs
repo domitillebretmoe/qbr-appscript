@@ -18,6 +18,8 @@ const RAG_LABELS = {
   amber: { text: 'WATCH', fill: '#FEF3C7', color: '#D97706' },
   red: { text: 'BEHIND', fill: '#FEE2E2', color: '#DC2626' },
 };
+// Data rows in the template's Deals Won table (tools/build_qbr_deck.py, n=10): the "other wins" line takes one of them.
+const DECK_DEALS_ROWS = 10;
 // Stage prefixes for the path-to-goal convention: commit = 4-5, best case = 3 (Tech Validation), early = 0-2.
 const COMMIT_STAGES = [4, 5];
 const BEST_CASE_STAGES = [3];
@@ -112,35 +114,65 @@ function restoreFontSize(shape, markers) {
 }
 
 // ---------------------------------------------------------------- tables
+// The template table is sized to its slot on the slide, so its data-row count is the capacity: longer lists are cut
+// to fit with a "+N more" line (a trailing Total row stays last). The template's empty cells carry no text style,
+// so every filled cell is given the marker cell's font (size, family, colour) rather than Slides' 18pt default.
 function fillTable(table, rows) {
   const marker = ROWS_TOKEN.exec(cellText(table.getCell(1, 0)).trim());
   if (!marker || !rows[marker[1]]) return;
-  const data = rows[marker[1]];
   const columns = table.getNumColumns();
-  const template = [];
-  for (let c = 0; c < columns; c++) template.push(c === 0 ? '' : cellText(table.getCell(1, c)));
+  const capacity = table.getNumRows() - 1;
+  const style = captureStyle(table.getCell(1, 0).getText().getTextStyle());
+  const data = fitRows(rows[marker[1]], capacity, columns);
   const want = Math.max(1, data.length);
-  while (table.getNumRows() - 1 < want) table.appendRow();
   while (table.getNumRows() - 1 > want) table.getRow(table.getNumRows() - 1).remove();
   if (!data.length) {
-    for (let c = 0; c < columns; c++) setCell(table.getCell(1, c), c === 0 ? '-' : '');
+    for (let c = 0; c < columns; c++) setCell(table.getCell(1, c), c === 0 ? '-' : '', style, c === 0);
     return;
   }
+  // A null cell keeps the template's own text and styling (the grey italic commentary prompts sit in every row).
   data.forEach((row, r) => {
-    for (let c = 0; c < columns; c++) setCell(table.getCell(r + 1, c), row[c] === null || row[c] === undefined ? template[c] : row[c]);
+    for (let c = 0; c < columns; c++) {
+      if (row[c] === null || row[c] === undefined) continue;
+      setCell(table.getCell(r + 1, c), row[c], style, c === 0);
+    }
   });
+}
+
+function fitRows(data, capacity, columns) {
+  if (data.length <= capacity) return data;
+  const total = /^Total/.test(String(data[data.length - 1][0])) ? data[data.length - 1] : null;
+  const body = total ? data.slice(0, -1) : data;
+  const shown = body.slice(0, capacity - 1 - (total ? 1 : 0));
+  const more = [`+${body.length - shown.length} more - see the cockpit tab`].concat(Array(columns - 1).fill(''));
+  return shown.concat([more], total ? [total] : []);
+}
+
+function captureStyle(textStyle) {
+  return {
+    size: textStyle.getFontSize(),
+    family: textStyle.getFontFamily(),
+    color: textStyle.getForegroundColor(),
+    bold: textStyle.isBold(),
+  };
 }
 
 function cellText(cell) {
   return cell.getText().asString().replace(/\n$/, '');
 }
 
-// A cell value is a string, a number (already formatted upstream) or a { text, url } link.
-function setCell(cell, value) {
+// A cell value is a string, a number (already formatted upstream) or a { text, url } link. `style` is the marker
+// cell's font; `bold` applies its weight (the template bolds the first column only).
+function setCell(cell, value, style, bold) {
   const text = cell.getText();
   const isLink = value && typeof value === 'object';
   text.setText(String(isLink ? value.text : value));
-  if (isLink && value.url) text.getTextStyle().setLinkUrl(value.url);
+  const ts = text.getTextStyle();
+  if (style.size) ts.setFontSize(style.size);
+  if (style.family) ts.setFontFamily(style.family);
+  if (style.color) ts.setForegroundColor(style.color);
+  ts.setBold(Boolean(bold && style.bold));
+  if (isLink && value.url) ts.setLinkUrl(value.url);
 }
 
 // ---------------------------------------------------------------- charts
@@ -223,7 +255,7 @@ function deckTokens(view) {
   const m = view.current;
   const prev = view.previous;
   const [f1, f2] = view.future;
-  const shown = m.lists.dealsWon;
+  const shown = dealsShown(m);
   const shownArr = sum(shown, 'deltaArr');
   const pct = (part, whole) => (whole ? ratio(part, whole) : null);
   const t = {
@@ -358,11 +390,17 @@ function forecastTokens(prefix, f, view) {
   return t;
 }
 
+// Deals listed on the Deals Won slide: the cockpit's top wins, leaving a row for "other wins" when there are more.
+function dealsShown(m) {
+  const list = m.lists.dealsWon;
+  return m.wonCount > list.length ? list.slice(0, DECK_DEALS_ROWS - 1) : list.slice(0, DECK_DEALS_ROWS);
+}
+
 // Every {{rows:name}} table. Cells: string | { text, url } | null (keep the template's text: the manual columns).
 function deckRows(view) {
   const m = view.current;
   const [f1, f2] = view.future;
-  const shown = m.lists.dealsWon;
+  const shown = dealsShown(m);
   const acct = o => deckLink(o.account, o.accountUrl);
   const dealsWon = shown.map(o => [acct(o), o.type || '-', fmtMoney(o.amount || 0), fmtMoney(o.deltaArr), o.owner || '-', null]);
   if (m.wonCount > shown.length) {

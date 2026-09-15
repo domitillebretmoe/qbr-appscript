@@ -33,6 +33,12 @@ function sampleView(quarter = 'Q3-2026') {
   return ctx.composeView({ team: 'Europe - DACH', members: ['Europe - DACH'], quarter, opps, accounts: dachAccounts, goals, ledgers: [ledger], unassignedAccounts: [], reps, today: TODAY });
 }
 
+// Table body as tools/build_qbr_deck.py's rows_for writes it: marker in the first cell, the manual-column prompts in
+// every row, n data rows (the slot's capacity).
+function rowsFor(marker, template, n) {
+  return Array.from({ length: n }, (_, r) => [r === 0 ? `{{rows:${marker}}}` : ''].concat(template));
+}
+
 // A template with one of each placeholder kind, like tools/build_qbr_deck.py emits.
 function templateDeck() {
   const deck = new FakePresentation();
@@ -44,15 +50,15 @@ function templateDeck() {
   score.shape('Net Added ARR {{netAddedArr}} of {{revenueGoal}} ({{attainment}}) {{qoq.netAddedArr}}');
   score.shape('{{rag.attainment}}');
   score.shape('Logos {{logosWonLand}} / {{logosWonMajors}} vs {{logoGoal}}; Q+1 {{q1}} forecast {{f1.netForecastArr}} ({{f1.netForecastPct}}), commit {{f1.commitArr}}, early {{f1.earlySharePct}}');
-  score.table([['Account', 'Type', 'TCV', 'Delta ARR', 'Owner', 'Why we won'], ['{{rows:dealsWon}}', '', '', '', '', 'Why we won / what it unlocks']]);
+  score.table([['Account', 'Type', 'TCV', 'Delta ARR', 'Owner', 'Why we won']].concat(rowsFor('dealsWon', ['', '', '', '', '[1 line - why we won, what it unlocks]'], 10)));
   const bridge = deck.slide();
   bridge.opaque();
   bridge.shape('{{chart:ARR bridge}}', { left: 50, top: 60, width: 400, height: 250 });
   bridge.shape('{{chart:Renewals won vs lost}}');
   bridge.shape('{{chart:Attainment}}', { left: 500, top: 60, width: 300, height: 250 });
-  bridge.table([['Stage', '# Open', 'Delta ARR', '% of pipe'], ['{{rows:stagesQ1}}', '', '', ''], ['', '', '', ''], ['', '', '', '']]);
-  bridge.table([['Account', 'Close', 'ARR', 'Expected', 'Risk driver', 'Mitigation'], ['{{rows:renewalsAtRisk}}', '', '', '', 'Risk driver', 'Mitigation + owner']]);
-  bridge.table([['Account', 'Status', 'End', 'Delta ARR', 'Notes'], ['{{rows:pilots}}', '', '', '', 'Outcome + engineering notes'], ['', '', '', '', '']]);
+  bridge.table([['Stage', '# Open', 'Delta ARR', '% of pipe']].concat(rowsFor('stagesQ1', ['', '', ''], 7)));
+  bridge.table([['Account', 'Close', 'ARR', 'Expected', 'Risk driver', 'Mitigation']].concat(rowsFor('renewalsAtRisk', ['', '', '', '[usage / budget / champion / product]', '[action, owner, date]'], 7)));
+  bridge.table([['Account', 'Status', 'End', 'Delta ARR', 'Notes']].concat(rowsFor('pilots', ['', '', '', '[Converted / lost / extended; DE effort, blockers]'], 7)));
   const commentary = deck.slide();
   commentary.shape('What worked and why - Sales leadership fills this in');
   return deck;
@@ -110,15 +116,21 @@ test('fillDeck replaces every token, resizes and fills tables, keeps manual colu
   const shown = view.current.lists.dealsWon;
   assert.equal(dealsWon.length - 1, shown.length);
   assert.equal(dealsWon[1][0], shown[0].account);
-  assert.equal(dealsWon[1][5], 'Why we won / what it unlocks');
+  assert.equal(dealsWon[1][5], '[1 line - why we won, what it unlocks]');
   assert.equal(deck.slides[1].tables[0].rows[1][0].link, shown[0].accountUrl);
+  // Filled cells take the marker cell's font (the template's empty cells are run-less, i.e. 18pt default in Slides);
+  // first column keeps its bold, the manual prompt column keeps its own grey style.
+  const cells = deck.slides[1].tables[0].rows[1];
+  assert.deepEqual([cells[1].fontSize, cells[1].fontFamily, cells[1].color, cells[1].bold], [8.5, 'Inter', '#0F172A', false]);
+  assert.deepEqual([cells[0].fontSize, cells[0].bold], [8.5, true]);
+  assert.deepEqual([cells[5].fontSize, cells[5].color], [8.5, '#94A3B8']);
   // Stage table shrinks to the rows + total; at-risk table keeps its manual columns; pilots row filled.
   const stages = deck.slides[2].tables[0].values();
   assert.equal(stages[stages.length - 1][0], 'Total open');
   assert.equal(stages.length - 1, view.future[0].pipelineByStage.length + 1);
   const atRisk = deck.slides[2].tables[1].values();
   assert.ok(atRisk.slice(1).some(r => r[0] === 'Helaba'), JSON.stringify(atRisk));
-  assert.equal(atRisk[1][4], 'Risk driver');
+  assert.equal(atRisk[1][4], '[usage / budget / champion / product]');
   const pilots = deck.slides[2].tables[2].values();
   assert.equal(pilots.length, 2);
   assert.equal(pilots[1][0], 'Allianz');
@@ -149,6 +161,31 @@ test('a {{size:N}} marker restores the intended font size and is removed, RAG pi
   assert.ok(['ON / ABOVE PLAN', 'WATCH', 'BEHIND'].includes(pill.textRange.text));
   assert.ok(pill.fill);
   assert.equal(plain.textRange.fontSize, null);
+});
+
+test('a list longer than the template table is cut to the slot with a "+N more" line, Total row kept last', () => {
+  const deck = new FakePresentation();
+  const slide = deck.slide();
+  slide.table([['Stage', '# Open', 'Delta ARR', '% of pipe']].concat(rowsFor('stagesQ1', ['', '', ''], 4)));
+  slide.table([['Account', 'Type', 'TCV', 'Delta ARR', 'Owner', 'Why']].concat(rowsFor('dealsWon', ['', '', '', '', '[why]'], 3)));
+  const rows = {
+    stagesQ1: [['0- Research', '1', '$1', '10%'], ['1- Discovery', '2', '$2', '20%'], ['2- Scope', '3', '$3', '30%'], ['3- Tech Validation', '4', '$4', '40%'], ['Total open', '10', '$10', '100%']],
+    dealsWon: [['A', 'Land', '$1', '$1', 'x', null], ['B', 'Land', '$1', '$1', 'x', null], ['C', 'Land', '$1', '$1', 'x', null], ['D', 'Land', '$1', '$1', 'x', null]],
+  };
+  slide.getTables().forEach(t => ctx.fillTable(t, rows));
+  const stages = slide.tables[0].values();
+  assert.equal(stages.length, 5);
+  assert.deepEqual(stages.slice(1).map(r => r[0]), ['0- Research', '1- Discovery', '+2 more - see the cockpit tab', 'Total open']);
+  const deals = slide.tables[1].values();
+  assert.deepEqual(deals.slice(1).map(r => r[0]), ['A', 'B', '+2 more - see the cockpit tab']);
+  assert.equal(deals[3][5], '');
+});
+
+test('deals shown leave a row for "other wins" only when the cockpit list is cut', () => {
+  const list = Array.from({ length: 10 }, (_, i) => ({ account: `A${i}`, deltaArr: 10 - i }));
+  assert.equal(ctx.dealsShown({ wonCount: 10, lists: { dealsWon: list } }).length, 10);
+  assert.equal(ctx.dealsShown({ wonCount: 11, lists: { dealsWon: list } }).length, 9);
+  assert.equal(ctx.dealsShown({ wonCount: 3, lists: { dealsWon: list.slice(0, 3) } }).length, 3);
 });
 
 test('an empty table shows a single "-" row', () => {

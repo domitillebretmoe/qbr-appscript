@@ -1,18 +1,43 @@
 // Minimal in-memory stand-in for the SlidesApp objects Deck.gs touches (presentation, slides, tables, shapes, text).
 'use strict';
 
+// `style` mirrors a template cell's run style: null fields = run-less paragraph (Slides then uses its 18pt default).
 class FakeText {
-  constructor(text) { this.text = text; this.link = null; this.color = null; this.fontSize = null; }
+  constructor(text, style) {
+    this.text = text;
+    this.link = null;
+    const s = style || {};
+    this.color = s.color || null;
+    this.fontSize = s.fontSize || null;
+    this.fontFamily = s.fontFamily || null;
+    this.bold = s.bold || false;
+  }
   asString() { return this.text; }
   setText(text) { this.text = String(text); return this; }
   replaceAllText(from, to) { const n = this.text.split(from).length - 1; this.text = this.text.split(from).join(to); return n; }
   getTextStyle() {
-    return {
-      setLinkUrl: url => { this.link = url; return this; },
-      setForegroundColor: color => { this.color = color; return this; },
-      setFontSize: size => { this.fontSize = size; return this; },
+    const style = {
+      setLinkUrl: url => { this.link = url; return style; },
+      setForegroundColor: color => { this.color = color; return style; },
+      setFontSize: size => { this.fontSize = size; return style; },
+      setFontFamily: family => { this.fontFamily = family; return style; },
+      setBold: bold => { this.bold = bold; return style; },
+      getForegroundColor: () => this.color,
+      getFontSize: () => this.fontSize,
+      getFontFamily: () => this.fontFamily,
+      isBold: () => this.bold,
     };
+    return style;
   }
+}
+
+// Table cell text as the generator writes it: styled runs for non-empty cells, run-less (unstyled) empty ones.
+const CELL_STYLE = { fontSize: 8.5, fontFamily: 'Inter', color: '#0F172A' };
+function cellText(text, r, c) {
+  if (text === '') return new FakeText('');
+  if (r === 0) return new FakeText(text, Object.assign({}, CELL_STYLE, { color: '#FFFFFF', bold: true }));
+  if (/^\[/.test(text)) return new FakeText(text, Object.assign({}, CELL_STYLE, { color: '#94A3B8' }));
+  return new FakeText(text, Object.assign({}, CELL_STYLE, { bold: c === 0 }));
 }
 
 let nextId = 1;
@@ -39,7 +64,7 @@ class FakeShape {
 }
 
 class FakeTable {
-  constructor(rows) { this.rows = rows.map(r => r.map(t => new FakeText(t))); }
+  constructor(rows) { this.rows = rows.map((r, ri) => r.map((t, ci) => cellText(t, ri, ci))); }
   getNumRows() { return this.rows.length; }
   getNumColumns() { return this.rows[0].length; }
   getCell(r, c) { return { getText: () => this.rows[r][c] }; }
