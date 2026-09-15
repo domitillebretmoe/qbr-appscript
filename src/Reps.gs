@@ -12,6 +12,9 @@ const REP_GROUPS = ['US Majors', 'Europe', 'Asia', 'LATAM', 'Federal', 'US Enter
 const REP_EXCLUDED_FAMILIES = ['Deployed Engineering', 'SDR', 'Pre-sales'];
 const REP_STALLED_DAYS = 60;
 const REP_RENEWAL_RECORD_TYPES = ['Support_Renewal', 'Fed_Renewal'];
+// Owners per activity-coverage query: a grouped SOQL result must fit in one 2,000-row batch, and one owner touches
+// well under 100 accounts a quarter.
+const REP_COVERAGE_OWNERS_PER_QUERY = 20;
 
 // One row per rep of `team` (all member teams for a roll-up), best quarter Won ARR first. Reps are always taken
 // from every team's segments so that a user's current (most recent) segment decides the team, whichever tab refreshes.
@@ -178,7 +181,8 @@ function queryRepStats(reps, quarter, today) {
       s.renewalAtRiskArr = (s.renewalAtRiskArr || 0) + o.Starting_ARR__c * (1 - o.Pwin__c / 100);
     });
 
-  const ownerList = `(${ids.concat(Object.keys(aliases)).map(soqlLiteral).join(', ')})`;
+  const owners = ids.concat(Object.keys(aliases));
+  const ownerList = `(${owners.map(soqlLiteral).join(', ')})`;
   const window = `ActivityDate >= ${qStart} AND ActivityDate < ${qEnd} AND ActivityDate <= ${today}`;
   const covered = {};
   const touch = (ownerId, accountOwner, accountId) => {
@@ -194,10 +198,13 @@ function queryRepStats(reps, quarter, today) {
         WHERE OwnerId IN ${ownerList} AND Gong__Gong_Activity_Id__c != null AND ${window} GROUP BY OwnerId`)
     .forEach(r => { const s = stat(repOf(r.o)); s.activities = (s.activities || 0) + r.c; });
   ['Event', 'Task'].forEach(object => {
-    soql(`SELECT OwnerId o, AccountId a, Account.OwnerId FROM ${object}
-          WHERE OwnerId IN ${ownerList} AND Gong__Gong_Activity_Id__c != null AND ${window} AND AccountId != null
-          GROUP BY OwnerId, AccountId, Account.OwnerId`)
-      .forEach(r => touch(r.o, r.Account ? r.Account.OwnerId : r.OwnerId, r.a)); // grouped relationship field comes back flat as OwnerId
+    for (let i = 0; i < owners.length; i += REP_COVERAGE_OWNERS_PER_QUERY) {
+      const batch = `(${owners.slice(i, i + REP_COVERAGE_OWNERS_PER_QUERY).map(soqlLiteral).join(', ')})`;
+      soql(`SELECT OwnerId o, AccountId a, Account.OwnerId FROM ${object}
+            WHERE OwnerId IN ${batch} AND Gong__Gong_Activity_Id__c != null AND ${window} AND AccountId != null
+            GROUP BY OwnerId, AccountId, Account.OwnerId`)
+        .forEach(r => touch(r.o, r.Account ? r.Account.OwnerId : r.OwnerId, r.a)); // grouped relationship field comes back flat as OwnerId
+    }
   });
   Object.keys(covered).forEach(rep => { stat(rep).coveredAccounts = Object.keys(covered[rep]).length; });
   return stats;

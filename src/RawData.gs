@@ -48,6 +48,7 @@ function writeRawData(tab, opps) {
   sheet.getRange(1, 1, 1, RAW_HEADER.length).setValues([RAW_HEADER]).setFontWeight('bold')
     .setBackground(COLORS.ink).setFontColor('#ffffff');
   if (rows.length) {
+    if (sheet.getMaxRows() < rows.length + 1) sheet.insertRowsAfter(sheet.getMaxRows(), rows.length + 1 - sheet.getMaxRows());
     sheet.getRange(2, 1, rows.length, RAW_HEADER.length).setValues(rows);
     RAW_MONEY_COLS.forEach(c => sheet.getRange(2, c, rows.length, 1).setNumberFormat(FORMATS.money));
     sheet.getRange(2, 14, rows.length, 1).setNumberFormat('0.##');
