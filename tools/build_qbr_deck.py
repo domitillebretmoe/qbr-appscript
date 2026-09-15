@@ -14,7 +14,7 @@ import sys
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
@@ -87,13 +87,16 @@ def no_line(shape):
 
 
 def text(slide, x, y, w, h, runs, size=11, color=TEXT, bold=False, font=FONT, align=PP_ALIGN.LEFT,
-         anchor=MSO_ANCHOR.TOP, italic=False, spacing=None):
-    """runs: str | list[str] (one paragraph each) | list[list[(text, {overrides})]]."""
+         anchor=MSO_ANCHOR.TOP, italic=False, spacing=None, fit=False):
+    """runs: str | list[str] (one paragraph each) | list[list[(text, {overrides})]].
+    fit=True (or a line count): shrink text on overflow (normAutofit), pre-scaled so a long {{token}} fits the box."""
     box = slide.shapes.add_textbox(x, y, w, h)
     tf = box.text_frame
     tf.word_wrap = True
     tf.margin_left = tf.margin_right = Inches(0.04)
     tf.margin_top = tf.margin_bottom = Inches(0.02)
+    if fit and isinstance(runs, str):
+        shrink_to_fit(tf, runs, size, w, h, lines=fit if isinstance(fit, int) and not isinstance(fit, bool) else 1)
     tf.vertical_anchor = anchor
     paragraphs = [runs] if isinstance(runs, str) else runs
     for i, para in enumerate(paragraphs):
@@ -112,6 +115,17 @@ def text(slide, x, y, w, h, runs, size=11, color=TEXT, bold=False, font=FONT, al
             f.italic = over.get("italic", italic)
             f.color.rgb = over.get("color", color)
     return box
+
+
+def shrink_to_fit(tf, s, size, w, h, lines=1):
+    """normAutofit with a pre-computed fontScale so importers show the text inside the box straight away."""
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    usable_w = (w - tf.margin_left - tf.margin_right) / 12700
+    usable_h = (h - tf.margin_top - tf.margin_bottom) / 12700
+    per_line = max(1, len(s) / lines)
+    scale = min(1.0, usable_w / (0.7 * per_line * size), usable_h / (1.25 * lines * size))
+    if scale < 1:
+        tf._txBody.bodyPr.find(qn("a:normAutofit")).set("fontScale", str(int(scale * 100000)))
 
 
 def rect(slide, x, y, w, h, fill=PANEL, line=None, shape=MSO_SHAPE.RECTANGLE, dash=False):
@@ -146,6 +160,9 @@ def pill(slide, x, y, label, fill, color, w=None, size=8.5):
     r = p.add_run()
     r.text = label
     r.font.name, r.font.size, r.font.bold, r.font.color.rgb = MONO, Pt(size), True, color
+    if "{{" in label:
+        tf.word_wrap = True
+        shrink_to_fit(tf, label, size, w, Inches(0.26))
     return s
 
 
@@ -292,9 +309,10 @@ def kpi_card(slide, x, y, w, h, label, value, sub, tone=None):
     rect(slide, x, y, w, h, fill=WHITE, line=LINE, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
     text(slide, x + Inches(0.15), y + Inches(0.1), w - Inches(0.3) - (Inches(1.4) if tone else 0), Inches(0.3),
          upper(label), size=8, color=MUTED, font=MONO, bold=True)
-    text(slide, x + Inches(0.15), y + Inches(0.38), w - Inches(0.3), Inches(0.55), value, size=24, color=INK,
-         bold=True)
-    text(slide, x + Inches(0.15), y + h - Inches(0.42), w - Inches(0.3), Inches(0.35), sub, size=8.5, color=MUTED)
+    text(slide, x + Inches(0.15), y + Inches(0.38), w - Inches(0.3), Inches(0.42), value, size=24, color=INK,
+         bold=True, fit=True)
+    text(slide, x + Inches(0.15), y + h - Inches(0.42), w - Inches(0.3), Inches(0.35), sub, size=8.5, color=MUTED,
+         fit=2)
     if tone:
         # tone is a {{rag.*}} token: Build deck writes ON / ABOVE PLAN, WATCH or BEHIND and colours the pill.
         pill(slide, x + w - Inches(1.45), y + Inches(0.1), tone, PANEL, MUTED, w=Inches(1.3), size=7)
