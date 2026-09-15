@@ -9,7 +9,7 @@
 // its link is written to the tab (M1) and remembered per team / quarter so a refresh keeps it.
 const DECK_TEMPLATE_KEY = 'QBR_DECK_TEMPLATE_ID';
 const DECK_LINKS_KEY = 'QBR_DECK_LINKS';
-const DEFAULT_DECK_TEMPLATE_ID = '1YMla6Dz5c2O5QyIWs3_l5ofhX1jCkTfX3dcBr4zCbxA';
+const DEFAULT_DECK_TEMPLATE_ID = '1SNdm5jqL-6AtJOWgSmEb7Blk_knhv_uJXCNsT96R9XU';
 const ROWS_TOKEN = /^\{\{rows:([A-Za-z0-9_]+)\}\}$/;
 const CHART_TOKEN = /\{\{chart:([^}]+)\}\}/;
 const FONT_SIZE_TAG = /\{\{size:(\d+(?:\.\d+)?)\}\}/;
