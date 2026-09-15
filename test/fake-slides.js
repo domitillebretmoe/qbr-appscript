@@ -15,14 +15,20 @@ class FakeText {
   }
 }
 
+let nextId = 1;
+
 class FakeShape {
   constructor(slide, text, box) {
     this.slide = slide;
+    this.id = `g${nextId++}`;
     this.textRange = new FakeText(text);
     this.box = box || { left: 10, top: 20, width: 300, height: 200 };
     this.fill = null;
     this.removed = false;
   }
+  getObjectId() { return this.id; }
+  getPageElementType() { return 'SHAPE'; }
+  asShape() { return this; }
   getText() { return this.textRange; }
   getLeft() { return this.box.left; }
   getTop() { return this.box.top; }
@@ -46,6 +52,11 @@ class FakeSlide {
   constructor() { this.shapes = []; this.tables = []; this.charts = []; }
   shape(text, box) { const s = new FakeShape(this, text, box); this.shapes.push(s); return s; }
   table(rows) { const t = new FakeTable(rows); this.tables.push(t); return t; }
+  // Live Slides hands back a Shape handle for every element and only fails on asShape(); mirror that with an
+  // opaque element the fill code must skip.
+  opaque() { const o = { getPageElementType: () => 'SHAPE', asShape() { throw new Error('Page element is not of type shape.'); } }; this.opaques = (this.opaques || []).concat(o); return o; }
+  getPageElements() { return this.shapes.concat(this.opaques || [], this.tables.map(t => ({ getPageElementType: () => 'TABLE', asShape() { throw new Error('Page element is not of type shape.'); } }))); }
+  getPageElementById(id) { return this.shapes.filter(s => s.id === id)[0] || null; }
   getShapes() { return this.shapes.slice(); }
   getTables() { return this.tables.slice(); }
   insertSheetsChart(chart, left, top, width, height) { this.charts.push({ chart, left, top, width, height }); }
