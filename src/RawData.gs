@@ -2,7 +2,7 @@
 // filter to their tab and tie the numbers out. Refreshing a tab replaces that tab's rows only.
 const RAW_HEADER = ['Tab', 'Resolved Team', 'Quarter', 'Account', 'Opportunity', 'Stage', 'Type', 'Record Type', 'Bucket',
   'Close Date', 'Delta ARR', 'Deal Value (TCV)', 'Expected Delta ARR', 'Expected Logo Impact', 'Major Account', 'Group', 'Opp Team', 'Owner',
-  'Lost Reason', 'Salesforce Id', 'Opportunity URL', 'Account URL'];
+  'Lost Reason', 'Pilot Status', 'Pilot End Date', 'Pilot End Quarter', 'Salesforce Id', 'Opportunity URL', 'Account URL'];
 const RAW_MONEY_COLS = [11, 12, 13];
 
 // How the opportunity is counted in the metrics (see Definitions).
@@ -15,7 +15,8 @@ function rawBucket(opp) {
 function rawRow(tab, opp) {
   return [tab, opp.team, opp.quarter, opp.account, opp.name, opp.stage, opp.type, opp.recordType, rawBucket(opp),
     opp.closeDate, opp.deltaArr, opp.amount || 0, opp.expectedDeltaArr, opp.expectedLogoImpact, opp.major ? 'Yes' : 'No', opp.oppGroup, opp.oppTeam,
-    opp.owner, opp.lostReason, opp.id, opp.url || '', opp.accountUrl || ''];
+    opp.owner, opp.lostReason, opp.pilotStatus || '', opp.pilotEndDate || '', opp.pilotEndDate ? quarterOfDate(opp.pilotEndDate) : '',
+    opp.id, opp.url || '', opp.accountUrl || ''];
 }
 
 function rawSheet() {

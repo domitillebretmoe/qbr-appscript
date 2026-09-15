@@ -401,3 +401,34 @@ test('QoQ baseline: previous quarter cut at the same elapsed day while the quart
   assert.equal(quarterMetrics(rows, 'Q2-2026', goals['Q2-2026']).netAddedArr, 950000);
   assert.equal(quarterMetrics(rows, 'Q2-2026', goals['Q2-2026'], '2026-07-26').netAddedArr, 1000000);
 });
+
+test('pilots: active = open opps in the Tech Validation stage (as of refresh, selected quarter only); completed = Pilot Status Complete by Pilot Actual End Date quarter, same-point cut applies', () => {
+  const pilot = (quarter, stage, account, extra) => opp(quarter, stage, account, 'Land', 'Enterprise', 100000, 1, extra);
+  const rows = [
+    pilot('Q3-2026', '3- Tech Validation', 'Running', { closeDate: '2026-10-20', pilotStatus: 'Live', pilotExpectedEnd: '2026-10-01' }),
+    pilot('Q4-2026', '3- Tech Validation', 'Running Later', { closeDate: '2026-11-20', pilotStatus: 'Not Started' }),
+    pilot('Q3-2026', '4- Business Validation', 'Advanced', { closeDate: '2026-09-30', pilotStatus: 'Complete', pilotEndDate: '2026-08-20' }),
+    pilot('Q4-2026', '1- Discovery', 'Done Early', { closeDate: '2026-12-01', pilotStatus: 'Complete', pilotEndDate: '2026-09-15' }),
+    pilot('Q3-2026', 'Closed Lost', 'Failed', { closeDate: '2026-09-05', pilotStatus: 'Complete', pilotEndDate: '2026-07-10' }),
+    pilot('Q3-2026', '3- Tech Validation', 'Paused', { closeDate: '2026-10-01', pilotStatus: 'Paused' }),
+    opp('Q3-2026', 'Closed Won', 'Won', 'Land', 'Enterprise', 200000, 1, { closeDate: '2026-08-10', pilotStatus: 'Complete', pilotEndDate: '' }),
+  ];
+  const goals = { 'Q1-2026': { revenue: 1, logos: 0 }, 'Q2-2026': { revenue: 1, logos: 0 }, 'Q3-2026': { revenue: 1, logos: 0 } };
+  const ledger = { 'Q1-2026': { startingArr: 1e6, endingArr: 1e6 }, 'Q2-2026': { startingArr: 1e6, endingArr: 1e6 }, 'Q3-2026': { startingArr: 1e6, endingArr: 1e6 } };
+  const view = composeView({ team: 'Europe - DACH', members: ['Europe - DACH'], quarter: 'Q3-2026', opps: rows, accounts: [], goals, ledgers: [ledger], today: '2026-09-10' });
+
+  assert.equal(view.current.activePilots, 3, 'open stage-3 opps of any close-date quarter, paused included');
+  assert.deepEqual(view.current.activePilotList.map(o => o.account), ['Running', 'Running Later', 'Paused']);
+  assert.equal(view.current.pilotsCompleted, 2, 'Complete with an end date in Q3 (Advanced, Done Early); Failed ended in Q2, Won has no end date');
+  assert.deepEqual(view.current.completedPilotList.map(o => o.account), ['Done Early', 'Advanced'], 'latest end date first');
+  assert.equal(view.previous.activePilots, null, 'no history for an as-of metric');
+  assert.equal(view.previous.pilotsCompleted, 0, 'Failed ended 2026-07-10, after the Q2 same-point cut (2026-06-10)');
+  assert.equal(view.trend.find(t => t.quarter === 'Q2-2026').pilotsCompleted, 1, 'full-quarter trend counts it');
+
+  const byStage = view.current.pipelineByStage;
+  assert.deepEqual(byStage.map(s => [s.stage, s.count, s.deltaArr]), [['3- Tech Validation', 2, 200000], ['4- Business Validation', 1, 100000]], 'open Q3 opps only, stage order');
+  assert.deepEqual(byStage.map(s => Math.round(s.share * 100)), [67, 33]);
+  assert.deepEqual(view.future[0].pipelineByStage.map(s => [s.stage, s.count]), [['1- Discovery', 1], ['3- Tech Validation', 1]]);
+  assert.equal(ctx.pipelineByStage([opp('Q3-2026', '1- Discovery', 'Neg', 'Land', 'Enterprise', -5, 0)])[0].share, null, 'no share on a non-positive total');
+  assert.deepEqual(['R1- Renewal', '2- Qualify', '10- Late', '1- Discovery'].sort(ctx.compareStages), ['1- Discovery', '2- Qualify', '10- Late', 'R1- Renewal']);
+});

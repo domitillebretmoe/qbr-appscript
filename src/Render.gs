@@ -74,6 +74,8 @@ const ACCOUNT_ROWS = [
   ['Conversion Rate (Activation : Conversion)', 'pct', 'conversionRate'],
   ['# Lost Pipeline', 'int', 'lostPipelineCount'],
   ['$ Lost Pipeline', 'money', 'lostPipelineArr'],
+  [`# Active Pilots (open, ${PILOT_STAGE})`, 'int', 'activePilots'],
+  ['# Pilots Completed (this quarter)', 'int', 'pilotsCompleted'],
 ];
 const FUTURE_ROWS = [
   ['Revenue Goal', 'money', 'revenueGoal'],
@@ -107,6 +109,9 @@ const RENEWAL_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Record 
 const DEAL_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Stage', 'text'], ['Close date', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
 const CUSTOMER_COLUMNS = [['#', 'int'], ['Account', 'link'], ['Team', 'text'], ['Current ARR', 'money'], ['% of active ARR', 'pct'], ['Open opp', 'text']];
 const RENEWAL_DUE_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Close date', 'date'], ['Current ARR', 'money'], ['Expected Delta ARR', 'money'], ['Owner', 'text']];
+const ACTIVE_PILOT_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Pilot status', 'text'], ['Expected end', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
+const COMPLETED_PILOT_COLUMNS = [['Account', 'link'], ['Opportunity', 'link'], ['Stage now', 'text'], ['Pilot end', 'date'], ['Delta ARR', 'money'], ['Owner', 'text']];
+const STAGE_COLUMNS = [['Stage', 'text'], ['# Open opps', 'int'], ['Delta ARR', 'money'], ['% of pipeline', 'pct']];
 const OWNER_COLUMNS = [['Owner', 'text'], ['Net Added ARR', 'money'], ['# Won', 'int'], ['Churn ARR', 'money'], ['Open pipeline (Q)', 'money'], ['Pipeline Q+1', 'money']];
 const QUALITY_COLUMNS = [['Issue', 'text'], ['Account', 'link'], ['Opportunity', 'link'], ['Detail', 'text'], ['Close date', 'date'], ['Owner', 'text']];
 // Full-width rep table (13 columns, B..N), the Salesforce Majors Rep Performance measures scoped to the tab's quarter
@@ -167,13 +172,15 @@ const KPI_NOTES = {
   partnerNewLogos: `New logos won through the ${PARTNER_GROUP} group.`,
   partnerChurnArr: `Churn ARR of opportunities in the ${PARTNER_GROUP} group.`,
   partnerChurnCustomers: `Full churn count in the ${PARTNER_GROUP} group.`,
+  activePilots: `Open opportunities in stage "${PILOT_STAGE}" as of the refresh, whatever their close date (see the Active Pilots table). No history, so no QoQ.`,
+  pilotsCompleted: 'Opportunities with Pilot Status = Complete and a Pilot Actual End Date in the quarter (see the Pilots Completed table).',
 };
 
 // Metrics kept per quarter in the data area (drives sparklines and the trend chart).
 const TREND_KEYS = ['quarter', 'revenueGoal', 'netAddedArr', 'attainment', 'logoAttainment', 'logosWonLand', 'logosWonMajors', 'logoAttainmentPct', 'endingArr',
   'renewals', 'wonRenewals', 'renewalRate', 'churnArr', 'churnCustomers', 'activeCustomers', 'conversionRate', 'lostPipelineCount',
   'lostPipelineArr', 'partnerNetAddedArr', 'partnerNewLogos', 'partnerChurnArr', 'partnerChurnCustomers', 'grr', 'nrr', 'pace',
-  'openPipelineArr', 'pipelineCoverage'];
+  'openPipelineArr', 'pipelineCoverage', 'pilotsCompleted'];
 
 function renderTeamTab(sheet, view) {
   resetSheet(sheet, view.team, view.quarter);
@@ -208,6 +215,13 @@ function renderTeamTab(sheet, view) {
   ]) + 1;
   row = writeTables(sheet, row, [
     oppTable('Lost Pipeline', 2, OPP_COLUMNS, lists.lostPipeline, o => o.type),
+    stageTable(`Pipeline by stage ${view.quarter}`, 9, view.current.pipelineByStage, view.current.openPipelineArr),
+  ]) + 1;
+  row = writeTables(sheet, row, [
+    { title: `Active Pilots (${view.current.activePilotList.length} open in ${PILOT_STAGE})`, col: 2, columns: ACTIVE_PILOT_COLUMNS,
+      rows: view.current.activePilotList.map(o => pilotRow(o, o.pilotStatus || '-', o.pilotExpectedEnd)) },
+    { title: `Pilots Completed ${view.quarter} (${view.current.completedPilotList.length})`, col: 9, columns: COMPLETED_PILOT_COLUMNS,
+      rows: view.current.completedPilotList.map(o => pilotRow(o, o.stage, o.pilotEndDate)) },
   ]) + 1;
   row = writeTables(sheet, row, [
     oppTable('Churned Customers', 2, RENEWAL_COLUMNS, lists.churned, o => o.recordType),
@@ -239,6 +253,10 @@ function renderTeamTab(sheet, view) {
   row = writeTables(sheet, row, [
     oppTable(`Top 10 Deals Q+1 ${q1.quarter}`, 2, DEAL_COLUMNS, q1.topDeals, o => o.stage),
     oppTable(`Top 10 Deals Q+2 ${q2.quarter}`, 9, DEAL_COLUMNS, q2.topDeals, o => o.stage),
+  ]) + 1;
+  row = writeTables(sheet, row, [
+    stageTable(`Pipeline by stage Q+1 ${q1.quarter}`, 2, q1.pipelineByStage, q1.pipelineArr),
+    stageTable(`Pipeline by stage Q+2 ${q2.quarter}`, 9, q2.pipelineByStage, q2.pipelineArr),
   ]) + 1;
   const renewalsDue = (title, col, f) => ({
     title: `${title} (${f.renewalsDueCount}, ${formatMoney(f.renewalArrDue)} up for renewal)`, col, columns: RENEWAL_DUE_COLUMNS,
@@ -484,6 +502,12 @@ function dealsWonTitle(quarter, shown, wonCount, wonArr) {
 // Opportunity names are long; the cell just says "Link" and points at the opportunity record.
 const oppRow = (o, middle) => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), middle(o) || '', o.closeDate || '', o.deltaArr, o.owner || ''];
 const wonRow = o => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), o.type || '', o.amount || 0, o.deltaArr, o.owner || ''];
+const pilotRow = (o, status, date) => [link(o.account, o.accountUrl), link(o.url ? 'Link' : '-', o.url), status || '', date || '', o.deltaArr, o.owner || ''];
+// Open pipeline of a quarter split by stage; the title carries the totals the shares are taken over.
+const stageTable = (title, col, stages, totalArr) => ({
+  title: `${title} (${sum(stages, 'count')} open opps, ${formatMoney(totalArr || 0)})`, col, columns: STAGE_COLUMNS,
+  rows: stages.map(s => [s.stage, s.count, s.deltaArr, s.share == null ? '' : s.share]),
+});
 
 // Side-by-side tables ({ title, col, columns, rows, width? }), DEFAULT_TABLE_WIDTH columns wide unless `width` is given: title row, header row, one row per
 // item (or a single "-" row). Link cells become Salesforce hyperlinks. Returns the row after the tallest table.

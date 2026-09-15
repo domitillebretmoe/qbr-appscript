@@ -24,14 +24,16 @@ function formulaContext(team, quarter, members, isSelected) {
   return { team: '$B$1', teamName: team, quarter: isSelected ? '$B$2' : quote(quarter), members, addr: {} };
 }
 
-function rawFormula(fn, sumColumn, ctx, criteria) {
+// Keyed on the tab and, unless `quarterColumn` is null, on the quarter (the close-date quarter by default).
+function rawFormula(fn, sumColumn, ctx, criteria, quarterColumn = 'Quarter') {
   const raw = name => sheetCol(RAW_SHEET, RAW_HEADER, name);
-  const parts = [raw('Tab'), ctx.team, raw('Quarter'), ctx.quarter];
+  const parts = [raw('Tab'), ctx.team].concat(quarterColumn ? [raw(quarterColumn), ctx.quarter] : []);
   criteria.forEach(([name, value]) => parts.push(raw(name), typeof value === 'string' && value.charAt(0) === '$' ? value : quote(value)));
   return `${fn}(${(sumColumn ? [raw(sumColumn)] : []).concat(parts).join(',')})`;
 }
 const rawSum = (column, ctx, ...criteria) => rawFormula('SUMIFS', column, ctx, criteria);
 const rawCount = (ctx, ...criteria) => rawFormula('COUNTIFS', null, ctx, criteria);
+const rawCountAllQuarters = (ctx, ...criteria) => rawFormula('COUNTIFS', null, ctx, criteria, null);
 const perRenewalType = build => RENEWAL_RECORD_TYPES.map(build).join('+');
 const perNewLogoType = build => NEW_LOGO_TYPES.map(build).join('+');
 const notRenewal = () => RENEWAL_RECORD_TYPES.map(type => ['Record Type', `<>${type}`]);
@@ -93,6 +95,10 @@ const METRIC_FORMULAS = {
   },
   lostPipelineCount: ctx => rawCount(ctx, ['Bucket', 'Lost pipeline']),
   lostPipelineArr: ctx => rawSum('Delta ARR', ctx, ['Bucket', 'Lost pipeline']),
+  // Pilots are not tied to the close-date quarter: active = open in the pilot stage in any quarter, completed = by
+  // the quarter of the Pilot Actual End Date.
+  activePilots: ctx => rawCountAllQuarters(ctx, ['Stage', PILOT_STAGE]),
+  pilotsCompleted: ctx => rawFormula('COUNTIFS', null, ctx, [['Pilot Status', PILOT_COMPLETE_STATUS]], 'Pilot End Quarter'),
   netForecastArr: ctx => `${forecastArr(ctx)}+${forecastChurnArr(ctx)}`,
   netForecastPct: ctx => { const r = refs(ctx, 'netForecastArr', 'revenueGoal'); return r && safeRatio(r[0], r[1]); },
   pipelineArr: ctx => rawSum('Delta ARR', ctx, ['Bucket', 'Open pipeline']),

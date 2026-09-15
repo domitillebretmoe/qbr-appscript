@@ -8,7 +8,7 @@
 // Salesforce, so goal, FY Won ARR, attainment and coverage stay FY-level.
 // Simplifications vs the dashboard: meetings are credited to the event owner (no participant credit), deduped by
 // Gong activity id; no slippage rate (needs the weekly snapshots).
-const REP_GROUPS = ['US Majors', 'Europe', 'Asia', 'LATAM'];
+const REP_GROUPS = ['US Majors', 'Europe', 'Asia', 'LATAM', 'Federal', 'US Enterprise', 'Partnerships'];
 const REP_EXCLUDED_FAMILIES = ['Deployed Engineering', 'SDR', 'Pre-sales'];
 const REP_STALLED_DAYS = 60;
 const REP_RENEWAL_RECORD_TYPES = ['Support_Renewal', 'Fed_Renewal'];

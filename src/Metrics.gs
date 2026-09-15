@@ -130,6 +130,43 @@ function forecastMetrics(opps, quarter, startingArr, goal, accounts) {
     predictedChurn: byField(churn, 'expectedDeltaArr', false),
     forecastEndingArr: startingArr + netForecastArr,
     topDeals: byField(open, 'deltaArr', true).slice(0, TOP_N),
+    pipelineByStage: pipelineByStage(rows),
+  };
+}
+
+// Salesforce stages are prefixed with their order ("1- Discovery", "3- Tech Validation"): sort on that number, then name.
+function compareStages(a, b) {
+  const order = stage => { const m = /^(\d+)/.exec(stage); return m ? Number(m[1]) : Infinity; };
+  return order(a) - order(b) || a.localeCompare(b);
+}
+
+// Where the quarter's open pipeline sits: one row per stage with the count, Delta ARR and share of the quarter's
+// open Delta ARR, so "90% of the pipe is in Discovery" is visible.
+function pipelineByStage(rows) {
+  const open = rows.filter(o => !o.isClosed);
+  const total = sum(open, 'deltaArr');
+  const stages = unique(open.map(o => o.stage)).sort(compareStages);
+  return stages.map(stage => {
+    const opps = open.filter(o => o.stage === stage);
+    const arr = sum(opps, 'deltaArr');
+    return { stage, count: opps.length, deltaArr: arr, share: total > 0 ? arr / total : null };
+  });
+}
+
+// Active pilots = open opportunities in the Tech Validation stage, whatever their close date (as of the refresh, so
+// only the selected quarter carries a value). Completed = Pilot Status "Complete" with a Pilot Actual End Date in the
+// quarter (by `asOf` when cut for a same-point comparison).
+const isActivePilot = o => !o.isClosed && o.stage === PILOT_STAGE;
+const isCompletedPilot = o => o.pilotStatus === PILOT_COMPLETE_STATUS && !!o.pilotEndDate;
+function pilotMetrics(opps, quarter, selected, asOf) {
+  const active = byField(opps.filter(isActivePilot), 'deltaArr', true);
+  const completed = opps.filter(o => isCompletedPilot(o) && quarterOfDate(o.pilotEndDate) === quarter && (!asOf || o.pilotEndDate <= asOf))
+    .sort((a, b) => b.pilotEndDate.localeCompare(a.pilotEndDate) || b.deltaArr - a.deltaArr);
+  return {
+    activePilots: selected ? active.length : null,
+    pilotsCompleted: completed.length,
+    activePilotList: selected ? active : [],
+    completedPilotList: completed,
   };
 }
 
@@ -263,7 +300,8 @@ function composeView({ team, members, quarter, opps, accounts, goals, ledgers, u
     };
   });
   const metricsFor = (q, asOf) => withPace(withArr(
-    Object.assign(quarterMetrics(opps, q, goalFor(q), asOf), accountMetrics(accounts, opps, q), partnerMetrics(opps, q, asOf)), ledger[q]), asOf || today);
+    Object.assign(quarterMetrics(opps, q, goalFor(q), asOf), accountMetrics(accounts, opps, q), partnerMetrics(opps, q, asOf),
+      pilotMetrics(opps, q, q === quarter, asOf), { pipelineByStage: pipelineByStage(inQuarter(opps, q)) }), ledger[q]), asOf || today);
   const trend = quarters.map(q => metricsFor(q));
   const current = trend[trend.length - 1];
   const previous = trend.length > 1 ? previousForQoQ(trend[trend.length - 2], current, today, metricsFor) : null;

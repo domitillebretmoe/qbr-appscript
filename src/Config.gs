@@ -56,6 +56,11 @@ const EXCLUDED_OWNERS = ['Christian Lawless'];
 
 const PARTNER_GROUP = 'Partnerships';
 
+// Pilots: an open opportunity in the Tech Validation stage is an active pilot; a pilot is completed once Pilot Status is
+// Complete, in the quarter of its Pilot Actual End Date.
+const PILOT_STAGE = '3- Tech Validation';
+const PILOT_COMPLETE_STATUS = 'Complete';
+
 function teamSegments(team) {
   return String(team).split(' - ').map(s => s.trim()).filter(Boolean);
 }

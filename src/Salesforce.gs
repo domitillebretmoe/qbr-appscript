@@ -140,6 +140,7 @@ function queryOpportunities(team, lastFiscalYear) {
   const query = `
     SELECT Id, Name, StageName, IsClosed, IsWon, Type, RecordType.Name, CloseDate, FiscalYear, FiscalQuarter,
            Amount, ARR__c, NACV__c, Expected_NACV__c, Expected_Logo_Impact__c, Closed_Lost_Reason_List__c, Closed_Lost_Reason__c,
+           Pilot_Status__c, Pilot_Type__c, Pilot_Expected_Close_Date__c, Pilot_Actual_End_Date__c,
            AccountId, Account.Name, Account.Team__r.Name, Account.Subteam__r.Name, Account.Major_Admin_Tag__c,
            Team__r.Name, Group__r.Name, OwnerId, Owner.Name
     FROM Opportunity
@@ -164,6 +165,10 @@ function queryOpportunities(team, lastFiscalYear) {
     expectedDeltaArrMissing: r.Expected_NACV__c == null,
     expectedLogoImpact: r.Expected_Logo_Impact__c || 0,
     lostReason: r.Closed_Lost_Reason_List__c || r.Closed_Lost_Reason__c || '',
+    pilotStatus: r.Pilot_Status__c || '',
+    pilotType: r.Pilot_Type__c || '',
+    pilotExpectedEnd: r.Pilot_Expected_Close_Date__c || '',
+    pilotEndDate: r.Pilot_Actual_End_Date__c || '',
     accountId: r.AccountId,
     accountUrl: recordUrl('Account', r.AccountId),
     account: r.Account.Name,

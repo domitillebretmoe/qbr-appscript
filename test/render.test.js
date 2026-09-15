@@ -506,6 +506,52 @@ test('rep activity & performance table spans the page with one linked row per re
   assert.equal(empty.rows[0][0].value, '-');
 });
 
+test('pilots and pipeline by stage: formula-backed counts over Raw Data pilot columns, linked pilot tables, stage tables for Q / Q+1 / Q+2', () => {
+  const pilot = (quarter, stage, account, extra) => opp(quarter, stage, account, 'Land', 'Enterprise', 100000, 1, extra);
+  const rows = dach.concat([
+    pilot('Q3-2026', '3- Tech Validation', 'Running', { closeDate: '2026-10-20', pilotStatus: 'Live', pilotExpectedEnd: '2026-10-01', owner: 'Kalle Harnos' }),
+    pilot('Q4-2026', '3- Tech Validation', 'Running Later', { closeDate: '2026-11-20', pilotStatus: 'Not Started' }),
+    pilot('Q4-2026', '2- Qualify', 'Done Early', { closeDate: '2026-12-01', pilotStatus: 'Complete', pilotEndDate: '2026-09-15' }),
+    pilot('Q3-2026', 'Closed Lost', 'Failed', { closeDate: '2026-09-05', pilotStatus: 'Complete', pilotEndDate: '2026-07-10' }),
+  ]);
+  const view = sampleView('Q3-2026', rows);
+  const sheet = render(view);
+  const labelled = (label, col) => { const c = cellsWhere(sheet, x => String(x.value).startsWith(label) && x.col === col)[0]; assert.ok(c, label); return c; };
+  const valueOf = (label, col) => Object.assign(sheet.cell(labelled(label, col).row, col + 1), { evaluated: sheet.valueAt(labelled(label, col).row, col + 1) });
+
+  const active = valueOf('# Active Pilots', 11);
+  assert.match(active.value, /^=COUNTIFS\('Raw Data'!A:A,\$B\$1,'Raw Data'!F:F,"3- Tech Validation"\)$/, 'not keyed on the close-date quarter');
+  assert.equal(active.evaluated, 2);
+  assert.equal(view.current.activePilots, 2);
+  assert.equal(sheet.cell(active.row, 13).value, '-', 'no QoQ for an as-of metric');
+  const completed = valueOf('# Pilots Completed', 11);
+  assert.match(completed.value, /^=COUNTIFS\('Raw Data'!A:A,\$B\$1,'Raw Data'!V:V,\$B\$2,'Raw Data'!T:T,"Complete"\)$/, 'keyed on Pilot End Quarter');
+  assert.equal(completed.evaluated, 1);
+  assert.equal(view.current.pilotsCompleted, 1);
+  assert.match(labelled('# Active Pilots', 11).note, /3- Tech Validation/);
+
+  const activeTable = tableRows(sheet, 'Active Pilots');
+  assert.equal(activeTable.title, 'Active Pilots (2 open in 3- Tech Validation)');
+  assert.deepEqual(activeTable.headers, ['Account', 'Opportunity', 'Pilot status', 'Expected end', 'Delta ARR', 'Owner']);
+  assert.deepEqual(activeTable.rows.map(r => [r[0].value, r[1].value, r[2].value, r[3].value, r[5].value]),
+    [['Running', 'Link', 'Live', '2026-10-01', 'Kalle Harnos'], ['Running Later', 'Link', 'Not Started', '', 'Anna Berger']]);
+  assert.equal(activeTable.rows[0][0].link, accountUrl('Running'));
+  const completedTable = tableRows(sheet, 'Pilots Completed Q3-2026');
+  assert.equal(completedTable.title, 'Pilots Completed Q3-2026 (1)');
+  assert.deepEqual(completedTable.rows.map(r => [r[0].value, r[2].value, r[3].value]), [['Done Early', '2- Qualify', '2026-09-15']]);
+
+  const byStage = tableRows(sheet, 'Pipeline by stage Q3-2026');
+  assert.deepEqual(byStage.headers, ['Stage', '# Open opps', 'Delta ARR', '% of pipeline']);
+  const expected = view.current.pipelineByStage;
+  assert.ok(expected.length >= 2);
+  assert.equal(byStage.title, `Pipeline by stage Q3-2026 (${expected.reduce((n, s) => n + s.count, 0)} open opps, ${ctx.formatMoney(view.current.openPipelineArr)})`);
+  assert.deepEqual(byStage.rows.map(r => [r[0].value, r[1].value, r[2].value, r[3].value]), expected.map(s => [s.stage, s.count, s.deltaArr, s.share]));
+  assert.equal(byStage.rows[0][3].numberFormat, '0.0%');
+  assert.ok(Math.abs(byStage.rows.reduce((n, r) => n + r[3].value, 0) - 1) < 1e-9, 'shares add up to 100%');
+  assert.ok(tableRows(sheet, 'Pipeline by stage Q+1 Q4-2026').rows.some(r => r[0].value === '3- Tech Validation'));
+  assert.ok(titleCell(sheet, 'Pipeline by stage Q+2 Q1-2027'));
+});
+
 const RAW_HEADER = vm.runInContext('RAW_HEADER', ctx);
 
 test('Raw Data tab lists every opportunity of the tab with its bucket and replaces only that tab\'s rows', () => {
