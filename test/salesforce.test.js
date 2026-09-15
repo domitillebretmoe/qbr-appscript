@@ -128,6 +128,24 @@ test('queryRepStats: Won ARR split FY vs selected quarter (MSP fallback applied)
   assert.ok(queries.some(q => q.includes('CreatedDate >= 2026-08-01T00:00:00Z AND CreatedDate < 2026-11-01T00:00:00Z')));
 });
 
+test('queryRepStats: account-coverage aggregates are split into owner batches (grouped SOQL cannot page past 2,000 rows)', () => {
+  const coverage = [];
+  const { ctx } = sfContext(url => {
+    const q = decodeURIComponent(url.split('?q=')[1] || '').replace(/\s+/g, ' ');
+    if (q.includes('GROUP BY OwnerId, AccountId, Account.OwnerId')) {
+      const owners = q.match(/OwnerId IN \(([^)]*)\)/)[1].split(', ');
+      coverage.push(owners.length);
+      return page(owners.map(o => ({ o: o.replace(/'/g, ''), a: 'acc-' + o.replace(/'/g, ''), OwnerId: o.replace(/'/g, '') })));
+    }
+    return page([]);
+  });
+  const reps = Array.from({ length: 45 }, (_, i) => ({ userId: `u${i}`, name: `Rep ${i}`, email: `r${i}@x.com` }));
+  const stats = ctx.queryRepStats(reps, 'Q3-2026', '2026-09-12');
+  assert.deepStrictEqual(coverage, [20, 20, 5, 20, 20, 5]); // Event then Task
+  assert.strictEqual(stats.u0.coveredAccounts, 1);
+  assert.strictEqual(stats.u44.coveredAccounts, 1);
+});
+
 test('queryOpportunities: pilots are fetched whatever their close date (open Tech Validation, or completed since the first quarter)', () => {
   const { ctx, calls } = sfContext(() => page([]));
   ctx.queryOpportunities('Europe - DACH', 2027);
