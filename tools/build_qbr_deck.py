@@ -5,7 +5,7 @@ Every quantitative slide names the cockpit tab / block / table it is filled from
 over the sheet rather than a second set of hand-typed numbers. Square-bracket tokens ([TEAM], [Qx-FYyy], $X.XM ...)
 are the placeholders to replace; grey italic text is guidance to delete. Speaker notes carry the fill instructions.
 
-    pip install python-pptx
+    pip install -r tools/requirements.txt
     python3 tools/build_qbr_deck.py out/QBR_Deck_Template.pptx
 """
 import sys
@@ -209,7 +209,9 @@ def new_slide(kicker, title, source=None, subtitle=None, status=True):
     s = prs.slides.add_slide(BLANK)
     rect(s, 0, 0, W, Inches(0.08), fill=INK)
     text(s, MX, Inches(0.28), Inches(6), Inches(0.25), kicker.upper(), size=8.5, color=MUTED, font=MONO, bold=True)
-    text(s, MX, Inches(0.5), Inches(9.2), Inches(0.6), title, size=22, color=INK, bold=True, anchor=MSO_ANCHOR.TOP)
+    title_w = CONTENT_W - Inches(4.4) if status else Inches(9.6)
+    text(s, MX, Inches(0.5), title_w, Inches(0.6), title, size=20 if len(title) > 70 else 22, color=INK, bold=True,
+         anchor=MSO_ANCHOR.TOP)
     if subtitle:
         text(s, MX, Inches(1.0), Inches(9.6), Inches(0.3), subtitle, size=10.5, color=MUTED)
     if status:
@@ -361,6 +363,8 @@ for num, head, desc, pages in agenda:
     text(s, W - MX - Inches(1.2), y + Inches(0.12), Inches(1.05), Inches(0.35), pages, size=9, color=FAINT, font=MONO,
          align=PP_ALIGN.RIGHT)
     y += Inches(0.6)
+notes(s, "Fixed structure - keep the section order so decks are comparable quarter to quarter. Update the slide ranges "
+         "only if you add or remove slides.")
 
 # 4 - Executive summary ------------------------------------------------------------------------------
 s = new_slide("01 · Executive summary", "[Headline: the quarter in one sentence - result, cause, implication]",
@@ -435,19 +439,22 @@ notes(s, "Starting / Ending ARR are ARR Ledger balances (seeded from the cockpit
 s = new_slide(f"02 · {Q} look back", "[Headline: e.g. 'N deals won for $X.XM Delta ARR - Net Added ARR ties out to these rows']",
               source=f"{TEAM} tab > 'Top 10 Deals Won {Q}' table (Account, Opportunity link, Type, Deal value (TCV), Delta ARR, Owner)")
 table(s, MX, CONTENT_TOP, Inches(8.6), ["Account", "Type", "Deal value (TCV)", "Delta ARR", "Owner", "Why we won / what it unlocks"],
-      [["[Account]", "Land / Expand / MSP / Renewal", "$X.XM", "$X.XM", "[Owner]", "[1 line]"] for _ in range(7)],
-      col_w=[2.0, 1.6, 1.2, 1.1, 1.3, 3.0], size=8.5, row_h=Inches(0.36), bold_first_col=True, guidance_cols=(5,))
+      [["[Account]", "[Land / Expand / MSP]", "$X.XM", "$X.XM", "[Owner]", "[1 line]"] for _ in range(10)]
+      + [["Other wins not shown (N)", "", "$X.XM", "$X.XM", "", "Delete this row if the quarter has <= 10 wins"]],
+      col_w=[2.0, 1.6, 1.2, 1.1, 1.3, 3.0], size=8.5, row_h=Inches(0.34), bold_first_col=True, guidance_cols=(5,))
 x2 = MX + Inches(8.9)
 callout(s, x2, CONTENT_TOP, CONTENT_W - Inches(8.9), Inches(1.5), "Tie-out",
-        "Sum of Delta ARR here + Closed Lost renewals (full churn) = Net Added ARR $X.XM on slide 5. Attribution is by "
-        "account team: a deal owned by another team's rep on this team's account counts here.")
+        "Delta ARR of all wins (top 10 + 'other wins' row) + Closed Lost renewals (full churn) = Net Added ARR $X.XM on "
+        "slide 5. Attribution is by account team: a deal owned by another team's rep on this team's account counts here.")
 callout(s, x2, CONTENT_TOP + Inches(1.7), CONTENT_W - Inches(8.9), Inches(1.3), "TCV vs Delta ARR",
         "MSP deals: TCV is the contract value; Delta ARR is the ARR booked (NACV, or the opp's ARR when NACV is 0). "
         "Explain any large gap in one line.", accent=BLUE)
 callout(s, x2, CONTENT_TOP + Inches(3.2), CONTENT_W - Inches(8.9), Inches(1.1), "Concentration",
         "Top deal = NN% of Added ARR. [Say whether that is a risk.]", accent=AMBER)
 notes(s, "Copy the Top 10 Deals Won table; keep the Salesforce links (paste the account name as a hyperlink to the "
-         "opportunity URL from Raw Data). The 'Why we won' column is the only manual column.")
+         "opportunity URL from Raw Data). If the cockpit title reads 'N Closed Won, $X shown of $Y', put the difference "
+         "in the 'Other wins not shown' row so the tie-out holds; otherwise delete that row. 'Why we won' is the only "
+         "manual column.")
 
 # 8 - Logos ------------------------------------------------------------------------------------------
 s = new_slide(f"02 · {Q} look back", "[Headline: e.g. 'N of N logos landed; N more expected from open Major opps']",
@@ -555,8 +562,8 @@ notes(s, "Written by the Engineering / Deployed Engineering leader for the regio
 s = new_slide(f"04 · {Q1} / {Q2} look ahead", f"[Headline: e.g. '{Q1} forecast $X.XM vs $X.XM goal (NN%); coverage N.Nx is below the 3x bar']",
               source=f"{TEAM} tab > FUTURE QUARTER(S) block ({Q1} and {Q2} columns: Revenue Goal, Net Forecast, Logo Goal, Pipeline, "
                      f"# Renewals due, ARR up for renewal, Starting -> Forecast Ending ARR, Forecast Churn); CHARTS > 'Q+1 / Q+2 forecast vs goal'")
-pill(s, MX, CONTENT_TOP - Inches(0.05), "FORECAST (quarter not started) - open opportunities only, weighted by Expected Delta ARR", BLUE_BG,
-     BLUE, w=Inches(6.6), size=8)
+pill(s, MX, CONTENT_TOP - Inches(0.05), "FORECAST (quarter not started) - Net forecast = Expected Delta ARR; Pipeline = open opps' Delta ARR",
+     BLUE_BG, BLUE, w=Inches(6.6), size=8)
 rows = [["Revenue goal", "$X.XM", "$X.XM"], ["Net forecast ($) / (%)", "$X.XM / NN%", "$X.XM / NN%"],
         ["Logo goal / Net forecast (#)", "N / N.N", "N / N.N"], ["Open pipeline / coverage (x goal)", "$X.XM / N.Nx", "$X.XM / N.Nx"],
         ["# Renewals due / ARR up for renewal", "N / $X.XM", "N / $X.XM"], ["Forecast churn ARR / #", "-$X.XM / N", "-$X.XM / N"],
@@ -568,8 +575,10 @@ chart_placeholder(s, MX + Inches(6.9), CONTENT_TOP, CONTENT_W - Inches(6.9), Inc
 callout(s, MX + Inches(6.9), CONTENT_TOP + Inches(2.8), CONTENT_W - Inches(6.9), Inches(1.5), "So what",
         "[Gap to goal in $ and logos; whether coverage is enough (rule of thumb 3x); what has to be true for the "
         "forecast to land.]", accent=AMBER)
-notes(s, "All values are forecast: Net Forecast = Won + Expected Delta ARR of open opps closing in the quarter. "
-         "Forecast churn = renewals with Expected Delta ARR < 0 ('Predicted Churn' tables).")
+notes(s, "Net Forecast = Expected Delta ARR of every Land / MSP / Expand opp and growing renewal with a close date in the "
+         "quarter (closed ones included, at their expected value) plus forecast churn (renewals with Expected Delta ARR < 0, "
+         "the 'Predicted Churn' tables). Open pipeline / coverage = Delta ARR of open opps only. Both are labelled FORECAST "
+         "until the quarter starts and then follow the tab banner.")
 
 # 14 - Pipeline quality -------------------------------------------------------------------------------
 s = new_slide(f"04 · {Q1} / {Q2} look ahead", "[Headline: e.g. 'NN% of Q+1 pipeline is still in Discovery / Scope - it is early, not real']",
@@ -716,6 +725,8 @@ callout(s, MX, CONTENT_TOP + Inches(2.3), half, Inches(1.6), "Capacity math",
         "[Accounts per rep today vs target; pilots per DE; what the plan assumes about ramp time.]", accent=BLUE)
 callout(s, MX + half + Inches(0.3), CONTENT_TOP + Inches(2.3), half, Inches(1.6), "Blockers",
         "[Recruiting pipeline volume, comp, location, process - and the ask, if any, on slide 22.]", accent=AMBER)
+notes(s, "Manual slide: headcount comes from the recruiting system / hiring plan, not the cockpit. Tie 'Impact if late' "
+         "to cockpit facts (uncovered Major accounts, unstaffed Active Pilots, Q+1 pipeline).")
 
 # 22 - Asks & decisions -------------------------------------------------------------------------------
 s = new_slide("07 · Asks & decisions", "Decisions needed from leadership - owners and dates", status=False)
@@ -743,7 +754,7 @@ mapping = [
     ["8 · Logos", "'Logo Goal', 'Logos Won (Land only / Land + MSP)', 'Logo Attainment (expected)', 'Logos Won' table", "Open Major logo opps from Raw Data"],
     ["9 · Retention", "'Churned', 'Downgrade', 'Renewals Won / Lost' tables; renewal & churn rows; 'Renewals' chart", ""],
     ["10 · Pilots", "'# Active Pilots', '# Pilots Completed', 'Active Pilots', 'Pilots Completed' tables", "Accounts block for conversion"],
-    ["13 · Forecast", "FUTURE QUARTER(S) block, 'Q+1 / Q+2 forecast vs goal' chart", "Open opps only"],
+    ["13 · Forecast", "FUTURE QUARTER(S) block, 'Q+1 / Q+2 forecast vs goal' chart", "Net forecast = Expected Delta ARR; pipeline = open opps"],
     ["14 · Pipeline quality", "'Pipeline by stage' tables (Q, Q+1, Q+2)", "Stalled >60d from Reps table"],
     ["15 · Deals to win", "'Top 10 Deals Q+1 / Q+2' tables", ""],
     ["16 · Renewals at risk", "'Renewals due Q+1 / Q+2', 'Predicted Churn Q+1 / Q+2' tables", ""],
@@ -753,6 +764,7 @@ mapping = [
 ]
 table(s, MX, CONTENT_TOP, CONTENT_W, ["Slide", "Cockpit block / table (team tab unless stated)", "Notes"], mapping,
       col_w=[2.0, 6.4, 3.6], size=8.5, row_h=Inches(0.3), bold_first_col=True)
+notes(s, "Reference slide - nothing to fill. Keep it in the pre-read so readers can audit any number against the cockpit.")
 
 # 24 - Appendix: definitions --------------------------------------------------------------------------
 s = new_slide("Appendix", "Definitions and reading rules", source="Definitions tab of the cockpit (authoritative wording)", status=False)
@@ -775,6 +787,7 @@ for i, (k, v) in enumerate(defs):
     y = CONTENT_TOP + row * Inches(0.98)
     text(s, x, y, half, Inches(0.25), k, size=9.5, color=INK, bold=True)
     text(s, x, y + Inches(0.24), half, Inches(0.7), v, size=8.5, color=MUTED)
+notes(s, "Nothing to fill. If a definition changes in the cockpit's Definitions tab, change it here in the same PR.")
 
 # 25 - Appendix: data quality -------------------------------------------------------------------------
 s = new_slide("Appendix", "Data quality - what would change these numbers",
@@ -785,6 +798,8 @@ table(s, MX, CONTENT_TOP, CONTENT_W, ["Issue", "Account", "Opportunity", "Detail
 guidance(s, MX, CONTENT_TOP + Inches(3.1), CONTENT_W, Inches(0.5),
          "Own the hygiene: each open issue has an owner and a fix-by date. Known model limits (not issues): no per-quarter "
          "account history, rep goals FY-only, MSP Delta ARR = opp ARR when NACV is 0.")
+notes(s, "Copy the 'Data quality' table from the OWNERS & DATA QUALITY section; 'Fix by' is the only manual column. Rows "
+         "here explain why a number may move on the next refresh (e.g. a Closed Won opp with no Delta ARR).")
 
 out = sys.argv[1] if len(sys.argv) > 1 else "QBR_Deck_Template.pptx"
 prs.save(out)

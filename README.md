@@ -106,7 +106,8 @@ it is filled from, the status pill mirrors the tab banner (FORECAST while the qu
 and Engineering leadership each get a look-back and a look-ahead commentary slide plus a shared asks / decisions table.
 
 ```sh
-python3 tools/build_qbr_deck.py QBR_Deck_Template.pptx   # needs python-pptx
+pip install -r tools/requirements.txt
+python3 tools/build_qbr_deck.py QBR_Deck_Template.pptx
 ```
 
 Square-bracket tokens (`[TEAM]`, `[Qx-FYyy]`, `$X.XM`, `NN%`) are the values to fill, grey italic text is guidance to delete,
