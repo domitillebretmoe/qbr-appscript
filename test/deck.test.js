@@ -8,6 +8,7 @@ const { FakePresentation, fakeChart } = require('./fake-slides');
 const { opp, dach, dachAccounts } = require('./fixtures');
 
 const env = globals();
+env.SlidesApp = { PageElementType: { SHAPE: 'SHAPE', TABLE: 'TABLE' } };
 const ctx = vm.createContext(env);
 ['Config.gs', 'Metrics.gs', 'Reps.gs', 'Ledger.gs', 'Formulas.gs', 'Render.gs', 'RawData.gs', 'Deck.gs']
   .forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
@@ -45,8 +46,10 @@ function templateDeck() {
   score.shape('Logos {{logosWonLand}} / {{logosWonMajors}} vs {{logoGoal}}; Q+1 {{q1}} forecast {{f1.netForecastArr}} ({{f1.netForecastPct}}), commit {{f1.commitArr}}, early {{f1.earlySharePct}}');
   score.table([['Account', 'Type', 'TCV', 'Delta ARR', 'Owner', 'Why we won'], ['{{rows:dealsWon}}', '', '', '', '', 'Why we won / what it unlocks']]);
   const bridge = deck.slide();
+  bridge.opaque();
   bridge.shape('{{chart:ARR bridge}}', { left: 50, top: 60, width: 400, height: 250 });
   bridge.shape('{{chart:Renewals won vs lost}}');
+  bridge.shape('{{chart:Attainment}}', { left: 500, top: 60, width: 300, height: 250 });
   bridge.table([['Stage', '# Open', 'Delta ARR', '% of pipe'], ['{{rows:stagesQ1}}', '', '', ''], ['', '', '', ''], ['', '', '', '']]);
   bridge.table([['Account', 'Close', 'ARR', 'Expected', 'Risk driver', 'Mitigation'], ['{{rows:renewalsAtRisk}}', '', '', '', 'Risk driver', 'Mitigation + owner']]);
   bridge.table([['Account', 'Status', 'End', 'Delta ARR', 'Notes'], ['{{rows:pilots}}', '', '', '', 'Outcome + engineering notes'], ['', '', '', '', '']]);
@@ -120,9 +123,10 @@ test('fillDeck replaces every token, resizes and fills tables, keeps manual colu
   assert.equal(pilots.length, 2);
   assert.equal(pilots[1][0], 'Allianz');
   assert.match(pilots[1][1], /^Active/);
-  // Charts: the bridge frame is swapped for the linked chart at the same box; the missing one is cleared.
-  assert.equal(deck.slides[2].charts.length, 1);
-  assert.deepEqual([deck.slides[2].charts[0].left, deck.slides[2].charts[0].width], [50, 400]);
+  // Charts: both matched frames are swapped for linked charts at their own boxes (the second still resolves after the
+  // first frame was removed); the missing one is cleared; the opaque element is skipped.
+  assert.equal(deck.slides[2].charts.length, 2);
+  assert.deepEqual(deck.slides[2].charts.map(c => [c.left, c.width]), [[50, 400], [500, 300]]);
   assert.equal(deck.slides[2].shapes.length, 1);
   assert.equal(deck.slides[2].shapes[0].textRange.text, '');
   // RAG pill coloured, commentary untouched.

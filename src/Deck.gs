@@ -77,14 +77,29 @@ function fillDeck(deck, view, charts) {
   const rows = deckRows(view);
   deck.getSlides().forEach(slide => {
     slide.getTables().forEach(table => fillTable(table, rows));
-    slide.getShapes().forEach(shape => placeChart(slide, shape, charts));
+    placeCharts(slide, charts);
   });
   const markers = new Set();
-  deck.getSlides().forEach(slide => slide.getShapes().forEach(shape => restoreFontSize(shape, markers)));
+  deck.getSlides().forEach(slide => slideShapes(slide).forEach(shape => restoreFontSize(shape, markers)));
   const tokens = deckTokens(view);
   Object.keys(tokens).forEach(key => deck.replaceAllText(`{{${key}}}`, tokens[key] == null ? '-' : String(tokens[key])));
   markers.forEach(marker => deck.replaceAllText(marker, ''));
-  deck.getSlides().forEach(slide => slide.getShapes().forEach(paintRagPill));
+  deck.getSlides().forEach(slide => slideShapes(slide).forEach(paintRagPill));
+}
+
+// The slide's text shapes. Walks getPageElements() by type rather than getShapes(): on imported decks the latter can
+// hand back an element Slides cannot expose as a Shape ("Page element is not of type shape"), which is skipped here.
+function slideShapes(slide) {
+  const shapes = [];
+  slide.getPageElements().forEach(element => {
+    if (element.getPageElementType() !== SlidesApp.PageElementType.SHAPE) return;
+    try {
+      shapes.push(element.asShape());
+    } catch (e) {
+      // not a text shape after all: nothing to fill
+    }
+  });
+  return shapes;
 }
 
 // The template draws long {{tokens}} at a reduced size so they fit their card and ends the text with a 1pt "{{size:24}}"
@@ -132,22 +147,36 @@ function setCell(cell, value) {
 // A shape whose text holds {{chart:name}} is swapped for the cockpit chart whose title starts with `name`, at the
 // same position and size, linked to the spreadsheet so "Update all" in Slides refreshes it. Without a matching
 // chart the token is cleared and the frame stays as a manual placeholder.
-function placeChart(slide, shape, charts) {
-  const match = CHART_TOKEN.exec(shape.getText().asString());
-  if (!match) return;
-  const wanted = match[1].trim().toLowerCase();
-  const chart = charts.filter(c => String(chartTitle(c)).toLowerCase().indexOf(wanted) === 0)[0];
-  if (!chart) {
-    shape.getText().replaceAllText(match[0], '');
-    return;
-  }
-  try {
-    slide.insertSheetsChart(chart, shape.getLeft(), shape.getTop(), shape.getWidth(), shape.getHeight());
-  } catch (e) {
-    shape.getText().replaceAllText(match[0], `Chart "${chartTitle(chart)}" could not be linked (${e.message}) - Insert > Chart > From Sheets.`);
-    return;
-  }
-  shape.remove();
+// The frames are read first and only then swapped, re-fetched by object id: inserting or removing a page element
+// while walking getShapes() leaves the remaining Shape handles pointing at other elements ("Page element is not
+// of type shape").
+function placeCharts(slide, charts) {
+  const frames = [];
+  slideShapes(slide).forEach(shape => {
+    const match = CHART_TOKEN.exec(shape.getText().asString());
+    if (!match) return;
+    frames.push({
+      id: shape.getObjectId(),
+      token: match[0],
+      wanted: match[1].trim().toLowerCase(),
+      box: [shape.getLeft(), shape.getTop(), shape.getWidth(), shape.getHeight()],
+    });
+  });
+  frames.forEach(frame => {
+    const shape = slide.getPageElementById(frame.id).asShape();
+    const chart = charts.filter(c => String(chartTitle(c)).toLowerCase().indexOf(frame.wanted) === 0)[0];
+    if (!chart) {
+      shape.getText().replaceAllText(frame.token, '');
+      return;
+    }
+    try {
+      slide.insertSheetsChart(chart, frame.box[0], frame.box[1], frame.box[2], frame.box[3]);
+    } catch (e) {
+      shape.getText().replaceAllText(frame.token, `Chart "${chartTitle(chart)}" could not be linked (${e.message}) - Insert > Chart > From Sheets.`);
+      return;
+    }
+    slide.getPageElementById(frame.id).remove();
+  });
 }
 
 function chartTitle(chart) {
