@@ -9,12 +9,14 @@ let oppSeq = 0;
 
 const opp = (quarter, stage, account, type, recordType, deltaArr, logo, extra = {}) => {
   const id = `006${String(++oppSeq).padStart(15, '0')}`;
-  return Object.assign({
+  const o = Object.assign({
     quarter, stage, account, type, recordType, deltaArr, expectedLogoImpact: logo, isClosed: stage.startsWith('Closed'),
     expectedDeltaArr: 0, lostReason: '', major: false, oppTeam: 'Europe', oppGroup: 'Europe',
     id, url: `${SF}/lightning/r/Opportunity/${id}/view`, accountId: accountId(account), accountUrl: accountUrl(account),
     name: `${account} - ${type}`, closeDate: '', owner: 'Anna Berger', team: 'Europe - DACH',
   }, extra);
+  if (!('ownerId' in o)) o.ownerId = `005${slug(o.owner)}`;
+  return o;
 };
 const dach = [
   opp('Q1-2026', 'Closed Won', 'CompuGroup', 'One Time', 'Enterprise', 0, 0, { closeDate: '2025-02-14' }),
@@ -35,7 +37,7 @@ const dach = [
   opp('Q2-2026', 'Closed Won', 'Helaba', 'Land', 'Enterprise', 150000, 1, { major: true, closeDate: '2025-06-27' }),
   opp('Q2-2026', 'Closed Lost', 'CompuGroup', 'Expand', 'Enterprise', 2000, 0, { closeDate: '2025-07-31' }),
   opp('Q2-2026', 'Closed Lost', 'Deutsche Telekom', 'Renewal', 'Renewal', -216000, -1, { major: true, lostReason: 'Budget', closeDate: '2025-07-15' }),
-  opp('Q3-2026', 'Closed Won', 'Zalando', 'Land', 'Enterprise', 96000, 1, { closeDate: '2025-08-20' }),
+  opp('Q3-2026', 'Closed Won', 'Zalando', 'Land', 'Enterprise', 96000, 1, { closeDate: '2025-08-20', amount: 288000 }),
   opp('Q3-2026', 'Closed Won', 'CompuGroup', 'Renewal', 'Renewal', 12000, 0, { closeDate: '2025-09-01' }),
   opp('Q3-2026', 'Closed Won', 'Julius Baer', 'Renewal', 'Renewal', -30000, 0, { closeDate: '2025-09-12', lostReason: 'Seat reduction' }),
   opp('Q3-2026', 'Closed Lost', 'Bolt', 'Renewal', 'Renewal', -84000, -1, { closeDate: '2025-09-30', lostReason: 'Competitor' }),

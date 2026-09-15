@@ -26,14 +26,19 @@ class FakeSheet {
     this.tabColor = null;
     this.maxRows = 1000;
     this.maxColumns = 26;
+    this.sheetId = 123456;
+    this.parent = { getId: () => 'SPREADSHEET_ID' };
   }
   cell(r, c) { return this.cells[`${r},${c}`] || (this.cells[`${r},${c}`] = { row: r, col: c }); }
   getName() { return this.name; }
+  getSheetId() { return this.sheetId; }
+  getParent() { return this.parent; }
   getMaxRows() { return this.maxRows; }
   getMaxColumns() { return this.maxColumns; }
   insertRowsAfter(after, n) { this.maxRows += n; return this; }
   insertColumnsAfter(after, n) { this.maxColumns += n; return this; }
   getLastRow() { return Math.max(0, ...Object.values(this.cells).map(c => c.row)); }
+  getLastColumn() { return Math.max(0, ...Object.values(this.cells).map(c => c.col)); }
   getRange(a, b, c, d) {
     if (typeof a === 'string') {
       const m = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/.exec(a);
@@ -59,6 +64,7 @@ class FakeSheet {
   setRowHeight(r, h) { this.rowHeights[r] = h; return this; }
   setColumnWidth(c, w) { this.colWidths[c] = w; return this; }
   setColumnWidths(c, n, w) { for (let i = 0; i < n; i++) this.colWidths[c + i] = w; return this; }
+  autoResizeColumns() { return this; }
   setFrozenRows(n) { this.frozenRows = n; }
   setFrozenColumns(n) { this.frozenColumns = n; }
   setHiddenGridlines(v) { this.hiddenGridlines = v; }
@@ -82,6 +88,7 @@ class FakeRange {
   setRichTextValue(rt) { return this.each(cell => { cell.value = rt.text; cell.richText = rt.runs; cell.link = rt.link; }); }
   setRichTextValues(values) { return this.each((cell, r, c) => { cell.value = values[r][c].text; cell.richText = values[r][c].runs; cell.link = values[r][c].link; }); }
   setNumberFormat(f) { return this.style('numberFormat', f); }
+  setNote(v) { return this.style('note', v); }
   setBackground(v) { return this.style('background', v); }
   setFontColor(v) { return this.style('fontColor', v); }
   setFontColors(m) { return this.each((cell, r, c) => { cell.fontColor = m[r][c]; }); }
@@ -118,6 +125,11 @@ const builder = (state = {}) => new Proxy({}, {
     if (k === 'setRanges') return ranges => builder(Object.assign(state, { ranges: ranges.map(r => r.getA1Notation()) }));
     if (k === 'setGradientMinpointWithValue') return (color, type, value) => builder(Object.assign(state, { min: { color, value } }));
     if (k === 'setGradientMaxpointWithValue') return (color, type, value) => builder(Object.assign(state, { max: { color, value } }));
+    if (k === 'whenNumberGreaterThanOrEqualTo') return v => builder(Object.assign(state, { when: { gte: v } }));
+    if (k === 'whenNumberLessThan') return v => builder(Object.assign(state, { when: { lt: v } }));
+    if (k === 'whenNumberBetween') return (a, b) => builder(Object.assign(state, { when: { between: [a, b] } }));
+    if (k === 'setBackground') return v => builder(Object.assign(state, { background: v }));
+    if (k === 'setFontColor') return v => builder(Object.assign(state, { fontColor: v }));
     return () => builder(state);
   },
 });

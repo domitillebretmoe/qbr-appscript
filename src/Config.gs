@@ -7,6 +7,7 @@ function quarterOptions(today) {
 
 const LEDGER_SHEET = 'ARR Ledger';
 const RAW_SHEET = 'Raw Data';
+const GOALS_SHEET = 'Goals';
 const SEED_SOURCE = 'Seeded from FY27 QBR Cockpit';
 
 // Team names as they appear in Salesforce (Account > Team). The text after " - " is the contains-token
@@ -54,6 +55,11 @@ const REGION_SEGMENTS = ['Europe', 'Asia', 'US Majors'];
 const EXCLUDED_OWNERS = ['Christian Lawless'];
 
 const PARTNER_GROUP = 'Partnerships';
+
+// Pilots: an open opportunity in the Tech Validation stage is an active pilot; a pilot is completed once Pilot Status is
+// Complete, in the quarter of its Pilot Actual End Date.
+const PILOT_STAGE = '3- Tech Validation';
+const PILOT_COMPLETE_STATUS = 'Complete';
 
 function teamSegments(team) {
   return String(team).split(' - ').map(s => s.trim()).filter(Boolean);
@@ -111,6 +117,36 @@ function quarterOfDate(isoDate) {
   const [year, month] = isoDate.split('-').map(Number);
   if (month === 1) return quarterLabel(4, year - 1);
   return quarterLabel(Math.floor((month - 2) / 3) + 1, year);
+}
+
+// First day of the quarter as yyyy-mm-dd (Q1 = 1 Feb of the fiscal year, Q4 = 1 Nov).
+function quarterStart(label) {
+  const { q, fy } = parseQuarter(label);
+  const month = 2 + (q - 1) * 3;
+  return `${fy}-${String(month).padStart(2, '0')}-01`;
+}
+
+// Share of the quarter's days already elapsed on `today` (yyyy-mm-dd): 0 before it starts, 1 once it is over.
+function quarterElapsed(label, today) {
+  const start = quarterStart(label);
+  return Math.min(1, Math.max(0, daysBetween(start, today) / daysBetween(start, quarterStart(shiftQuarter(label, 1)))));
+}
+
+function daysBetween(fromIso, toIso) {
+  const day = iso => Date.UTC(...iso.slice(0, 10).split('-').map((n, i) => Number(n) - (i === 1 ? 1 : 0)));
+  return Math.round((day(toIso) - day(fromIso)) / 86400000);
+}
+
+function shiftDate(iso, days) {
+  const date = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+// The day of `previousQuarter` that is as far in as `today` is in `quarter` (e.g. day 41 of both), for like-for-like
+// quarter-on-quarter comparisons while `quarter` is in progress.
+function samePointInQuarter(quarter, previousQuarter, today) {
+  return shiftDate(quarterStart(previousQuarter), daysBetween(quarterStart(quarter), today));
 }
 
 function quartersBetween(first, last) {

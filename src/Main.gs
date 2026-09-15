@@ -52,14 +52,18 @@ function refreshTabsNamed(names) {
   withRefreshLock(() => runRefreshQueue(names));
 }
 
+// Several tabs share one Salesforce pull (withBulkFetch); a single tab keeps its narrower per-team queries.
 function runRefreshQueue(names) {
   const ss = SpreadsheetApp.getActive();
   const started = Date.now();
   const pending = names.slice();
-  while (pending.length && Date.now() - started < REFRESH_BUDGET_MS) {
-    const sheet = ss.getSheetByName(pending.shift());
-    if (sheet && isTeamTab(sheet)) refreshTab(sheet);
-  }
+  const run = () => {
+    while (pending.length && Date.now() - started < REFRESH_BUDGET_MS) {
+      const sheet = ss.getSheetByName(pending.shift());
+      if (sheet && isTeamTab(sheet)) refreshTab(sheet);
+    }
+  };
+  if (names.length > 1) withBulkFetch(run); else run();
   if (pending.length) {
     const queued = takePendingTabs().filter(name => pending.indexOf(name) < 0);
     PropertiesService.getDocumentProperties().setProperty(PENDING_TABS_KEY, JSON.stringify(pending.concat(queued)));
@@ -96,8 +100,10 @@ function refreshTab(sheet) {
   if (!rollupMembers(team)) assertSpecificTeam(team);
   parseQuarter(quarter);
   const view = buildView(team, quarter);
-  renderTeamTab(sheet, view);
+  // Raw Data and Goals first: the tab's metric formulas read them.
   writeRawData(team, view.opps);
+  writeGoals(team, view.goals);
+  renderTeamTab(sheet, view);
 }
 
 // Installable trigger target: re-renders a team tab when B1 or B2 changes (including a paste over B1:B2).
@@ -149,7 +155,7 @@ function teamSheet(team) {
 
 // The fiscal quarter we are in today.
 function defaultQuarter() {
-  return quarterOfDate(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+  return quarterOfDate(todayIso());
 }
 
 function setSalesforceCredentials() {
@@ -172,35 +178,33 @@ function setSalesforceCredentials() {
 // A roll-up tab (see ROLLUP_TEAMS) is the sum of its member teams: their rows are fetched per member so each member's
 // ARR Ledger rows roll forward exactly as on its own tab, then the roll-up's Starting/Ending ARR is the sum.
 function buildView(team, quarter) {
-  const next1 = shiftQuarter(quarter, 1);
-  const next2 = shiftQuarter(quarter, 2);
+  const lastFy = parseQuarter(shiftQuarter(quarter, 2)).fy;
   const members = rollupMembers(team) || [team];
-  const oppsByMember = members.map(member => fetchOpportunities(member, parseQuarter(next2).fy));
+  const oppsByMember = members.map(member => fetchOpportunities(member, lastFy));
   const opps = [].concat(...oppsByMember);
-  const accounts = [].concat(...members.map(fetchAccounts));
-  const goals = sumGoals(members.map(fetchGoals));
-  const goalFor = q => goals[q] || { revenue: 0, logos: 0 };
-
   const quarters = quartersBetween(FIRST_QUARTER, quarter);
-  const actuals = quarters.map(q => Object.assign(quarterMetrics(opps, q, goalFor(q)), accountMetrics(accounts, opps, q), partnerMetrics(opps, q)));
   const ledgers = members.map((member, i) => {
     const netAddedByQuarter = {};
     quarters.forEach(q => { netAddedByQuarter[q] = quarterMetrics(oppsByMember[i], q, {}).netAddedArr; });
     return rollLedger(member, quarter, netAddedByQuarter);
   });
-  const ledger = {};
-  quarters.forEach(q => {
-    ledger[q] = {
-      startingArr: ledgers.reduce((total, l) => total + l[q].startingArr, 0),
-      endingArr: ledgers.reduce((total, l) => total + l[q].endingArr, 0),
-    };
+  return composeView({
+    team,
+    members,
+    quarter,
+    opps,
+    accounts: [].concat(...members.map(fetchAccounts)),
+    goals: sumGoals(members.map(fetchGoals)),
+    ledgers,
+    unassignedAccounts: fetchRegionOnlyAccounts(team),
+    reps: fetchRepPerformance(team, quarter, todayIso()),
+    ownerTeams: fetchOwnerTeams(unique(opps.map(o => o.ownerId).filter(Boolean))),
+    today: todayIso(),
   });
-  const trend = actuals.map(m => withArr(m, ledger[m.quarter]));
-  const current = trend[trend.length - 1];
+}
 
-  const future1 = forecastMetrics(opps, next1, current.endingArr, goalFor(next1));
-  const future2 = forecastMetrics(opps, next2, future1.forecastEndingArr, goalFor(next2));
-  return { team, members, quarter, trend, current, future: [future1, future2], opps };
+function todayIso() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
 function sumGoals(goalsByMember) {
