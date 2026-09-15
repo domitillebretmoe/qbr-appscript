@@ -385,7 +385,7 @@ test('QoQ baseline: previous quarter cut at the same elapsed day while the quart
   assert.equal(open.previous.openPipelineArr, null, 'open pipeline cannot be reconstructed as of a past day');
   assert.equal(open.previous.logoAttainment, null);
   assert.equal(open.previous.endingArr, 1.95e6, 'ledger balances stay full quarter');
-  assert.equal(open.previous.conversionRate, null, 'the late Land win is not a same-point conversion (0 won / 0 activated)');
+  assert.equal(open.previous.conversionRate, null, 'activated prospects are as of today, so no same-point conversion');
   assert.equal(open.trend[1].conversionRate, 1, 'full Q2 counts it');
   assert.equal(open.previous.quarterElapsedPct, quarterElapsed('Q3-2026', '2026-09-10'), 'same share of the quarter elapsed');
   assert.match(qoqBasis(open.previous), /^Q2-2026 at the same point \(day 40, deals closed by 2026-06-10\)$/);

@@ -170,17 +170,18 @@ function pilotMetrics(opps, quarter, selected, asOf) {
   };
 }
 
-// Account counts are as of the refresh (Salesforce has no per-quarter account history).
+// Account counts are as of the refresh (Salesforce has no per-quarter account history), so the conversion rate
+// cannot be rebuilt as of a past day (`asOf`) and is left blank for a same-point baseline.
 function accountMetrics(accounts, opps, quarter, asOf) {
   const active = accounts.filter(a => a.currentArr > 0);
   const activated = accounts.filter(a => a.currentArr <= 0 && a.hasOpenOpp);
-  const wonLands = closedBy(inQuarter(opps, quarter), asOf).filter(o => isWon(o) && isNewLogo(o));
+  const wonLands = inQuarter(opps, quarter).filter(o => isWon(o) && isNewLogo(o));
   return {
     activeCustomers: active.length,
     majorCustomers: active.filter(a => a.major).length,
     enterpriseCustomers: active.filter(a => !a.major).length,
     activatedProspects: activated.length,
-    conversionRate: ratio(wonLands.length, wonLands.length + activated.length),
+    conversionRate: asOf ? null : ratio(wonLands.length, wonLands.length + activated.length),
     activeArr: sum(active, 'currentArr'),
     topMajors: byField(active.filter(a => a.major), 'currentArr', true).slice(0, TOP_N),
     topEnterprise: byField(active.filter(a => !a.major), 'currentArr', true).slice(0, TOP_N),
