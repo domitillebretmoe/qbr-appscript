@@ -220,6 +220,13 @@ def table(slide, x, y, w, headers, rows, col_w=None, size=9, row_h=Inches(0.3), 
             tf.word_wrap = True
             p = tf.paragraphs[0]
             p.alignment = (align[c] if align else PP_ALIGN.LEFT) if r else (align[c] if align else PP_ALIGN.LEFT)
+            if str(val) == "":
+                # Run-less paragraph rather than an empty <a:r/> (a construct some importers reject); size on endParaRPr.
+                end = p._p.get_or_add_endParaRPr()
+                end.set("sz", str(int(size * 100)))
+                rgb(cell, PANEL if (zebra and r % 2 == 0) else WHITE)
+                set_cell_border(cell)
+                continue
             run = p.add_run()
             run.text = str(val)
             f = run.font
