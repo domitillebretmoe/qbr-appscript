@@ -132,6 +132,16 @@ test('fillDeck replaces every token, resizes and fills tables, keeps manual colu
   assert.equal(deck.slides[3].shapes[0].textRange.text, 'What worked and why - Sales leadership fills this in');
 });
 
+test('a shape tagged qbr:fontSize gets its intended size back once the token is a value', () => {
+  const deck = new FakePresentation();
+  const slide = deck.slide();
+  const kpi = slide.shape('{{netAddedArr}}', null, 'qbr:fontSize=24');
+  const plain = slide.shape('{{quarter}}');
+  ctx.fillDeck(deck, sampleView(), []);
+  assert.equal(kpi.textRange.fontSize, 24);
+  assert.equal(plain.textRange.fontSize, null);
+});
+
 test('an empty table shows a single "-" row', () => {
   const view = sampleView('Q1-2026'); // no Closed Won lands in Q1
   const deck = new FakePresentation();

@@ -12,6 +12,7 @@ const DECK_LINKS_KEY = 'QBR_DECK_LINKS';
 const DEFAULT_DECK_TEMPLATE_ID = '1YMla6Dz5c2O5QyIWs3_l5ofhX1jCkTfX3dcBr4zCbxA';
 const ROWS_TOKEN = /^\{\{rows:([A-Za-z0-9_]+)\}\}$/;
 const CHART_TOKEN = /\{\{chart:([^}]+)\}\}/;
+const FONT_SIZE_TAG = /qbr:fontSize=(\d+(?:\.\d+)?)/;
 const RAG_LABELS = {
   green: { text: 'ON / ABOVE PLAN', fill: '#D1FAE5', color: '#047857' },
   amber: { text: 'WATCH', fill: '#FEF3C7', color: '#D97706' },
@@ -80,7 +81,17 @@ function fillDeck(deck, view, charts) {
   });
   const tokens = deckTokens(view);
   Object.keys(tokens).forEach(key => deck.replaceAllText(`{{${key}}}`, tokens[key] == null ? '-' : String(tokens[key])));
-  deck.getSlides().forEach(slide => slide.getShapes().forEach(paintRagPill));
+  deck.getSlides().forEach(slide => slide.getShapes().forEach(shape => {
+    restoreFontSize(shape);
+    paintRagPill(shape);
+  }));
+}
+
+// The template draws long {{tokens}} at a reduced size so they fit their card; the intended size is recorded in the
+// shape description as "qbr:fontSize=24" and applied here once the token has become a short value.
+function restoreFontSize(shape) {
+  const match = FONT_SIZE_TAG.exec(shape.getDescription() || '');
+  if (match) shape.getText().getTextStyle().setFontSize(Number(match[1]));
 }
 
 // ---------------------------------------------------------------- tables

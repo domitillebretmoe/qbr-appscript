@@ -14,7 +14,7 @@ import sys
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
@@ -89,14 +89,15 @@ def no_line(shape):
 def text(slide, x, y, w, h, runs, size=11, color=TEXT, bold=False, font=FONT, align=PP_ALIGN.LEFT,
          anchor=MSO_ANCHOR.TOP, italic=False, spacing=None, fit=False):
     """runs: str | list[str] (one paragraph each) | list[list[(text, {overrides})]].
-    fit=True (or a line count): shrink text on overflow (normAutofit), pre-scaled so a long {{token}} fits the box."""
+    fit=True (or a line count): render a long {{token}} at a reduced size so it fits the box; Deck.gs restores `size`
+    (recorded in the shape description) once the token is replaced by a value."""
     box = slide.shapes.add_textbox(x, y, w, h)
     tf = box.text_frame
     tf.word_wrap = True
     tf.margin_left = tf.margin_right = Inches(0.04)
     tf.margin_top = tf.margin_bottom = Inches(0.02)
     if fit and isinstance(runs, str):
-        shrink_to_fit(tf, runs, size, w, h, lines=fit if isinstance(fit, int) and not isinstance(fit, bool) else 1)
+        size = fit_font(box, runs, size, w, h, lines=fit if isinstance(fit, int) and not isinstance(fit, bool) else 1)
     tf.vertical_anchor = anchor
     paragraphs = [runs] if isinstance(runs, str) else runs
     for i, para in enumerate(paragraphs):
@@ -117,15 +118,21 @@ def text(slide, x, y, w, h, runs, size=11, color=TEXT, bold=False, font=FONT, al
     return box
 
 
-def shrink_to_fit(tf, s, size, w, h, lines=1):
-    """normAutofit with a pre-computed fontScale so importers show the text inside the box straight away."""
-    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+FONT_SIZE_TAG = "qbr:fontSize="  # shape description, read by Deck.gs restoreFontSize()
+
+
+def fit_font(shape, s, size, w, h, lines=1):
+    """Font size (pt) at which `s` fits the box on `lines` lines; tags the shape with the intended size if reduced.
+    No autofit XML: Google Slides import is picky about it, so the template carries a plain smaller size."""
+    tf = shape.text_frame
     usable_w = (w - tf.margin_left - tf.margin_right) / 12700
     usable_h = (h - tf.margin_top - tf.margin_bottom) / 12700
     per_line = max(1, len(s) / lines)
     scale = min(1.0, usable_w / (0.7 * per_line * size), usable_h / (1.25 * lines * size))
-    if scale < 1:
-        tf._txBody.bodyPr.find(qn("a:normAutofit")).set("fontScale", str(int(scale * 100000)))
+    if scale >= 1:
+        return size
+    shape._element.nvSpPr.cNvPr.set("descr", f"{FONT_SIZE_TAG}{size:g}")
+    return max(6, round(size * scale * 2) / 2)
 
 
 def rect(slide, x, y, w, h, fill=PANEL, line=None, shape=MSO_SHAPE.RECTANGLE, dash=False):
@@ -159,10 +166,10 @@ def pill(slide, x, y, label, fill, color, w=None, size=8.5):
     p.alignment = PP_ALIGN.CENTER
     r = p.add_run()
     r.text = label
-    r.font.name, r.font.size, r.font.bold, r.font.color.rgb = MONO, Pt(size), True, color
     if "{{" in label:
         tf.word_wrap = True
-        shrink_to_fit(tf, label, size, w, Inches(0.26))
+        size = fit_font(s, label, size, w, Inches(0.26))
+    r.font.name, r.font.size, r.font.bold, r.font.color.rgb = MONO, Pt(size), True, color
     return s
 
 
