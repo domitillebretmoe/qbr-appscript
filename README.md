@@ -107,11 +107,26 @@ and Engineering leadership each get a look-back and a look-ahead commentary slid
 
 ```sh
 pip install -r tools/requirements.txt
-python3 tools/build_qbr_deck.py QBR_Deck_Template.pptx
+python3 tools/build_qbr_deck.py QBR_Deck_Template.pptx   # add --raw to skip the LibreOffice pass
 ```
 
-Square-bracket tokens (`[TEAM]`, `[Qx-FYyy]`, `$X.XM`, `NN%`) are the values to fill, grey italic text is guidance to delete,
-and dashed frames mark where to link a chart from the cockpit (Google Slides: Insert > Chart > From Sheets).
+The file is re-saved through LibreOffice (`soffice`) when it is installed: Google Slides refuses to open the package as
+python-pptx writes it but imports the LibreOffice-written one, so ship the normalised file.
+
+The template is machine-fillable: `{{token}}` placeholders (`{{team}}`, `{{netAddedArr}}`, `{{f1.netForecastArr}}`,
+`{{qoq.grr}}`, `{{rag.attainment}}`...), a `{{rows:name}}` marker in the first data cell of each table, and `{{chart:title}}`
+in the dashed chart frames; a trailing 1pt `{{size:N}}` marks text drawn smaller than intended so the long token fits
+(Build deck restores N pt and drops the marker). Square-bracket text and grey italics are commentary to write or delete.
+
+### Build a deck from the cockpit (Google Slides)
+
+Import the .pptx once into a native Google Slides file (File > Import slides, or set it via **QBR > Set deck template...**;
+the default template ID is in `Deck.gs`). Then on any team tab: **QBR > Build deck (this tab)** refreshes the tab, creates
+`<team> <quarter> QBR (forecast|actuals, cockpit <date>)` in your Drive from the template, replaces every token from the tab's metrics (actuals vs
+forecast, same-point QoQ, Land vs Land + MSP, TCV vs Delta ARR, account-level attribution unchanged), fills the tables
+(resized to the data, Salesforce links kept, manual commentary columns left as guidance), inserts the cockpit charts linked
+to the sheet, and writes the deck link into M1 of the tab (remembered per team / quarter across refreshes). Requires the
+`presentations` OAuth scope in `appsscript.json`.
 
 ## Reconciliation against the FY27 QBR Cockpit workbook
 

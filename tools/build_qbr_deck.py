@@ -8,7 +8,12 @@ are the placeholders to replace; grey italic text is guidance to delete. Speaker
     pip install -r tools/requirements.txt
     python3 tools/build_qbr_deck.py out/QBR_Deck_Template.pptx
 """
+import os
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -45,12 +50,29 @@ CONTENT_TOP = Inches(1.35)
 CONTENT_W = W - 2 * MX
 
 # Placeholder tokens used everywhere so a find & replace fills the boilerplate.
-TEAM = "[TEAM]"
-Q = "[Qx-FYyy]"
-Q1 = "[Q+1]"
-Q2 = "[Q+2]"
-STATUS = "[ACTUALS (closed) | FORECAST (NN% elapsed)]"
-REFRESH = "[cockpit refreshed yyyy-mm-dd]"
+# Machine-readable placeholders: src/Deck.gs (QBR > Build deck) replaces every {{token}}, fills every table whose
+# first data cell is {{rows:name}} and swaps every shape holding {{chart:title}} for the cockpit chart of that title.
+TEAM = "{{team}}"
+Q = "{{quarter}}"
+Q1 = "{{q1}}"
+Q2 = "{{q2}}"
+STATUS = "{{status}}"
+REFRESH = "{{refreshed}}"
+
+
+def tok(name):
+    return "{{" + name + "}}"
+
+
+def upper(label):
+    """Upper-case a label but leave {{tokens}} as they are (Deck.gs matches them case-sensitively)."""
+    return "".join(p if p.startswith("{{") else p.upper() for p in re.split(r"(\{\{[^}]*\}\})", label))
+
+
+def rows_for(marker, template, n=3):
+    """Table body for a {{rows:marker}} table: the marker in the first cell, `template` (manual-column guidance or '')
+    in the others, repeated so the template looks like a table; Deck.gs resizes it to the data."""
+    return [[tok("rows:" + marker) if r == 0 else ""] + list(template) for r in range(n)]
 
 prs = Presentation()
 prs.slide_width, prs.slide_height = W, H
@@ -69,13 +91,19 @@ def no_line(shape):
 
 
 def text(slide, x, y, w, h, runs, size=11, color=TEXT, bold=False, font=FONT, align=PP_ALIGN.LEFT,
-         anchor=MSO_ANCHOR.TOP, italic=False, spacing=None):
-    """runs: str | list[str] (one paragraph each) | list[list[(text, {overrides})]]."""
+         anchor=MSO_ANCHOR.TOP, italic=False, spacing=None, fit=False):
+    """runs: str | list[str] (one paragraph each) | list[list[(text, {overrides})]].
+    fit=True (or a line count): render a long {{token}} at a reduced size so it fits the box; Deck.gs restores `size`
+    (recorded in the shape description) once the token is replaced by a value."""
     box = slide.shapes.add_textbox(x, y, w, h)
     tf = box.text_frame
     tf.word_wrap = True
     tf.margin_left = tf.margin_right = Inches(0.04)
     tf.margin_top = tf.margin_bottom = Inches(0.02)
+    intended = None
+    if fit and isinstance(runs, str):
+        size, intended = fit_font(box, runs, size, w, h,
+                                  lines=fit if isinstance(fit, int) and not isinstance(fit, bool) else 1)
     tf.vertical_anchor = anchor
     paragraphs = [runs] if isinstance(runs, str) else runs
     for i, para in enumerate(paragraphs):
@@ -93,7 +121,33 @@ def text(slide, x, y, w, h, runs, size=11, color=TEXT, bold=False, font=FONT, al
             f.bold = over.get("bold", bold)
             f.italic = over.get("italic", italic)
             f.color.rgb = over.get("color", color)
+    if intended:
+        size_marker(p, intended, color)
     return box
+
+
+FONT_SIZE_TAG = "{{size:"  # {{size:24}} marker run, read by Deck.gs restoreFontSize()
+
+
+def fit_font(shape, s, size, w, h, lines=1):
+    """(font size at which `s` fits the box on `lines` lines, intended size or None if nothing was reduced).
+    No autofit XML: Google Slides import is picky about it, so the template carries a plain smaller size."""
+    tf = shape.text_frame
+    usable_w = (w - tf.margin_left - tf.margin_right) / 12700
+    usable_h = (h - tf.margin_top - tf.margin_bottom) / 12700
+    per_line = max(1, len(s) / lines)
+    scale = min(1.0, usable_w / (0.7 * per_line * size), usable_h / (1.25 * lines * size))
+    if scale >= 1:
+        return size, None
+    return max(6, round(size * scale * 2) / 2), size
+
+
+def size_marker(paragraph, intended, color):
+    """Trailing 1pt {{size:N}} run: Deck.gs sets the shape's text to N pt and removes the marker. Carried in the text
+    (not alt text / shape name) because that is the only thing every importer keeps."""
+    r = paragraph.add_run()
+    r.text = f"{FONT_SIZE_TAG}{intended:g}" + "}}"
+    r.font.size, r.font.color.rgb = Pt(1), color
 
 
 def rect(slide, x, y, w, h, fill=PANEL, line=None, shape=MSO_SHAPE.RECTANGLE, dash=False):
@@ -127,7 +181,13 @@ def pill(slide, x, y, label, fill, color, w=None, size=8.5):
     p.alignment = PP_ALIGN.CENTER
     r = p.add_run()
     r.text = label
+    intended = None
+    if "{{" in label:
+        tf.word_wrap = True
+        size, intended = fit_font(s, label, size, w, Inches(0.26))
     r.font.name, r.font.size, r.font.bold, r.font.color.rgb = MONO, Pt(size), True, color
+    if intended:
+        size_marker(p, intended, color)
     return s
 
 
@@ -178,6 +238,13 @@ def table(slide, x, y, w, headers, rows, col_w=None, size=9, row_h=Inches(0.3), 
             tf.word_wrap = True
             p = tf.paragraphs[0]
             p.alignment = (align[c] if align else PP_ALIGN.LEFT) if r else (align[c] if align else PP_ALIGN.LEFT)
+            if str(val) == "":
+                # Run-less paragraph rather than an empty <a:r/> (a construct some importers reject); size on endParaRPr.
+                end = p._p.get_or_add_endParaRPr()
+                end.set("sz", str(int(size * 100)))
+                rgb(cell, PANEL if (zebra and r % 2 == 0) else WHITE)
+                set_cell_border(cell)
+                continue
             run = p.add_run()
             run.text = str(val)
             f = run.font
@@ -208,7 +275,7 @@ def new_slide(kicker, title, source=None, subtitle=None, status=True):
     slide_no += 1
     s = prs.slides.add_slide(BLANK)
     rect(s, 0, 0, W, Inches(0.08), fill=INK)
-    text(s, MX, Inches(0.28), Inches(6), Inches(0.25), kicker.upper(), size=8.5, color=MUTED, font=MONO, bold=True)
+    text(s, MX, Inches(0.28), Inches(6), Inches(0.25), upper(kicker), size=8.5, color=MUTED, font=MONO, bold=True)
     title_w = CONTENT_W - Inches(4.4) if status else Inches(9.6)
     text(s, MX, Inches(0.5), title_w, Inches(0.6), title, size=20 if len(title) > 70 else 22, color=INK, bold=True,
          anchor=MSO_ANCHOR.TOP)
@@ -236,7 +303,7 @@ def notes(slide, body):
 def callout(slide, x, y, w, h, heading, body, accent=GREEN, fill=PANEL):
     rect(slide, x, y, w, h, fill=fill, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
     rect(slide, x, y + Inches(0.1), Inches(0.06), h - Inches(0.2), fill=accent)
-    text(slide, x + Inches(0.18), y + Inches(0.08), w - Inches(0.3), Inches(0.28), heading.upper(), size=8.5,
+    text(slide, x + Inches(0.18), y + Inches(0.08), w - Inches(0.3), Inches(0.28), upper(heading), size=8.5,
          color=accent if accent != GREEN else GREEN_DARK, font=MONO, bold=True)
     text(slide, x + Inches(0.18), y + Inches(0.36), w - Inches(0.3), h - Inches(0.45), body, size=9.5, color=TEXT,
          spacing=3)
@@ -246,33 +313,45 @@ def guidance(slide, x, y, w, h, body, size=9):
     return text(slide, x, y, w, h, body, size=size, color=FAINT, italic=True, spacing=2)
 
 
-def chart_placeholder(slide, x, y, w, h, chart_title, instruction):
-    rect(slide, x, y, w, h, fill=WHITE, line=FAINT, dash=True, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
-    text(slide, x + Inches(0.2), y + Inches(0.15), w - Inches(0.4), Inches(0.3), chart_title, size=10.5, color=INK,
-         bold=True)
-    text(slide, x + Inches(0.2), y + h / 2 - Inches(0.45), w - Inches(0.4), Inches(0.9),
-         [[("Linked chart placeholder", {"bold": True, "color": MUTED, "size": 10})],
-          [(instruction, {"color": FAINT, "size": 9, "italic": True})],
-          [("Insert > Chart > From Sheets (Google Slides) - keep 'Link to spreadsheet' so it refreshes with the cockpit.",
-            {"color": FAINT, "size": 8.5, "italic": True})]],
-         align=PP_ALIGN.CENTER)
+def chart_placeholder(slide, x, y, w, h, chart_title, instruction, chart=None):
+    """One dashed frame. With `chart` (cockpit chart title prefix) it carries {{chart:...}} and Build deck replaces the
+    whole frame with the linked Sheets chart at this position; without it stays as guidance for a manual chart."""
+    frame = rect(slide, x, y, w, h, fill=WHITE, line=FAINT, dash=True, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    tf = frame.text_frame
+    tf.word_wrap = True
+    tf.margin_left = tf.margin_right = Inches(0.2)
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    paras = [[(chart_title, {"bold": True, "color": INK, "size": 10.5})],
+             [(tok("chart:" + chart) if chart else "Linked chart placeholder", {"bold": True, "color": MUTED, "size": 10})],
+             [(instruction, {"color": FAINT, "size": 9, "italic": True})],
+             [("QBR > Build deck links this chart from the cockpit; or Insert > Chart > From Sheets and keep 'Link to spreadsheet'.",
+               {"color": FAINT, "size": 8.5, "italic": True})]]
+    for i, para in enumerate(paras):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = PP_ALIGN.CENTER
+        for piece, over in para:
+            r = p.add_run()
+            r.text = piece
+            r.font.name, r.font.size = FONT, Pt(over["size"])
+            r.font.bold, r.font.italic, r.font.color.rgb = over.get("bold", False), over.get("italic", False), over["color"]
+    return frame
 
 
 def kpi_card(slide, x, y, w, h, label, value, sub, tone=None):
     rect(slide, x, y, w, h, fill=WHITE, line=LINE, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
     text(slide, x + Inches(0.15), y + Inches(0.1), w - Inches(0.3) - (Inches(1.4) if tone else 0), Inches(0.3),
-         label.upper(), size=8, color=MUTED, font=MONO, bold=True)
-    text(slide, x + Inches(0.15), y + Inches(0.38), w - Inches(0.3), Inches(0.55), value, size=24, color=INK,
-         bold=True)
-    text(slide, x + Inches(0.15), y + h - Inches(0.42), w - Inches(0.3), Inches(0.35), sub, size=8.5, color=MUTED)
+         upper(label), size=8, color=MUTED, font=MONO, bold=True)
+    text(slide, x + Inches(0.15), y + Inches(0.38), w - Inches(0.3), Inches(0.42), value, size=24, color=INK,
+         bold=True, fit=True)
+    text(slide, x + Inches(0.15), y + h - Inches(0.42), w - Inches(0.3), Inches(0.35), sub, size=8.5, color=MUTED,
+         fit=2)
     if tone:
-        fill, col, label_ = {"g": (GREEN_BG, GREEN_DARK, "ON / ABOVE PLAN"), "a": (AMBER_BG, AMBER, "WATCH"),
-                             "r": (RED_BG, RED, "BEHIND")}[tone]
-        pill(slide, x + w - Inches(1.45), y + Inches(0.1), label_, fill, col, w=Inches(1.3), size=7)
+        # tone is a {{rag.*}} token: Build deck writes ON / ABOVE PLAN, WATCH or BEHIND and colours the pill.
+        pill(slide, x + w - Inches(1.45), y + Inches(0.1), tone, PANEL, MUTED, w=Inches(1.3), size=7)
 
 
 def section_label(slide, x, y, w, label):
-    text(slide, x, y, w, Inches(0.25), label.upper(), size=8.5, color=MUTED, font=MONO, bold=True)
+    text(slide, x, y, w, Inches(0.25), upper(label), size=8.5, color=MUTED, font=MONO, bold=True)
     rect(slide, x, y + Inches(0.27), w, Emu(9525), fill=LINE)
 
 
@@ -314,22 +393,22 @@ text(s, MX, Inches(6.3), Inches(8), Inches(0.6),
       [("Date ", {"color": FAINT}), ("[QBR date]", {"color": WHITE})]], size=11)
 text(s, W - MX - Inches(4), H - Inches(0.6), Inches(4), Inches(0.3), "Cognition  ·  Proprietary & Confidential",
      size=8.5, color=FAINT, font=MONO, align=PP_ALIGN.RIGHT)
-notes(s, "Replace [TEAM], [Qx-FYyy] and the status pill with the banner text of the team tab (row 1: "
-         "'Qx-yyyy QBR - FORECAST (quarter in progress, NN% elapsed)' or '... ACTUALS (quarter closed)'). "
-         "The headline is the one sentence a reader should remember; write it last.")
+notes(s, "QBR > Build deck (this tab) fills {{team}}, {{quarter}}, the status pill and the refresh date from the team "
+         "tab (B1 / B2 and the row-1 banner). The headline is the one sentence a reader should remember; write it last.")
 
 # 2 - How to use --------------------------------------------------------------------------------------
 s = new_slide("How to use this template", "One cockpit, one story per slide, explicit asks",
               source="Template guidance - delete this slide before presenting", status=False)
 col_w = (CONTENT_W - Inches(0.3)) / 2
 bullets(s, MX, CONTENT_TOP, col_w, Inches(4.6), [
-    ("Numbers come from the QBR cockpit, not from memory.", "Set B1 = team, B2 = quarter, QBR > Refresh this tab. "
-     "Every quantitative slide's footer names the tab block / table to copy from; the appendix maps each metric."),
+    ("Numbers come from the QBR cockpit, not from memory.", "Set B1 = team, B2 = quarter, QBR > Build deck (this tab): "
+     "it refreshes the tab and fills every number, table and chart. Each slide's footer names the source block; the appendix maps each metric."),
     ("Actuals vs forecast is always visible.", "The blue pill on every slide mirrors the tab banner: while the quarter is "
      "open all quarter numbers are FORECAST (quarter in progress); after quarter end they are ACTUALS."),
     ("QoQ is like for like.", "While the quarter is open the cockpit compares to the previous quarter at the same elapsed "
      "day; open pipeline / coverage / conversion have no same-point value and show '-'."),
-    ("Charts are linked, not pasted.", "Use Insert > Chart > From Sheets and keep the link so charts refresh with the cockpit."),
+    ("Charts are linked, not pasted.", "Build deck inserts the cockpit charts linked to the sheet; Tools > Linked objects > "
+     "Update all refreshes them after a cockpit refresh."),
 ], size=10)
 bullets(s, MX + col_w + Inches(0.3), CONTENT_TOP, col_w, Inches(4.6), [
     ("Commentary is structured.", "Sales and Engineering leadership each have a look-back and a look-ahead slide with "
@@ -338,7 +417,8 @@ bullets(s, MX + col_w + Inches(0.3), CONTENT_TOP, col_w, Inches(4.6), [
      "action' callout. If a slide has no takeaway, drop it."),
     ("Keep it to ~25 slides.", "Details (full tables, rep list, definitions, data-quality issues) live in the appendix "
      "and in the cockpit itself; the cockpit PDF (cell M2) is the pre-read attachment."),
-    ("Placeholders.", "[square brackets] and $X.XM / NN% are values to fill; grey italic text is guidance to delete."),
+    ("Placeholders.", "Double-brace tokens and tables are filled by QBR > Build deck (this tab) from the selected team tab; "
+     "[square brackets] and grey italic text are commentary to write or delete."),
 ], size=10)
 notes(s, "Delete before presenting.")
 
@@ -370,10 +450,15 @@ notes(s, "Fixed structure - keep the section order so decks are comparable quart
 s = new_slide("01 · Executive summary", "[Headline: the quarter in one sentence - result, cause, implication]",
               source=f"{TEAM} tab > KPI cards (row 5) and {Q} QUARTER block; Definitions tab for every metric")
 cw = (CONTENT_W - 3 * Inches(0.2)) / 4
-cards = [("Net Added ARR", "$X.XM", f"Goal $X.XM  ·  NN% attainment  ·  pace NN%", "g"),
-         ("Logos won (Majors)", "N", "Goal N  ·  Land only N  ·  Land + MSP N  ·  expected incl. open N.N", "a"),
-         ("Churn / renewals", "-$X.XM", "N customers  ·  N of N renewals won  ·  GRR NN%  ·  NRR NN%", "r"),
-         ("Ending ARR", "$X.XM", "Starting $X.XM  ·  QoQ +NN% (same point)", None)]
+cards = [("Net Added ARR", tok("netAddedArr"),
+          f"Goal {tok('revenueGoal')}  ·  {tok('attainment')} attainment  ·  pace {tok('pace')}", tok("rag.attainment")),
+         ("Logos won (Majors)", tok("logosWonMajors"),
+          f"Goal {tok('logoGoal')}  ·  Land only {tok('logosWonLand')}  ·  Land + MSP {tok('logosWonMajors')}  ·  "
+          f"expected incl. open {tok('logoAttainment')}", tok("rag.logoAttainmentPct")),
+         ("Churn / renewals", tok("churnArr"),
+          f"{tok('churnCustomers')} customers  ·  {tok('wonRenewals')} of {tok('renewals')} renewals won  ·  "
+          f"GRR {tok('grr')}  ·  NRR {tok('nrr')}", tok("rag.renewalRate")),
+         ("Ending ARR", tok("endingArr"), f"Starting {tok('startingArr')}  ·  {tok('endingArrQoq')} vs Starting ARR", None)]
 for i, (lab, val, sub, tone) in enumerate(cards):
     kpi_card(s, MX + i * (cw + Inches(0.2)), CONTENT_TOP, cw, Inches(1.45), lab, val, sub, tone)
 y = CONTENT_TOP + Inches(1.7)
@@ -388,46 +473,52 @@ callout(s, MX + half + Inches(0.3), y, half, Inches(1.65), "Top risks to " + Q1,
         ["1. [Risk - deal / renewal / capacity, $ at stake, owner]", "2. [Risk]", "3. [Risk]"], accent=AMBER)
 callout(s, MX + half + Inches(0.3), y + Inches(1.9), half, Inches(1.65), "Decisions needed today",
         ["1. [Decision - what, from whom, by when]  (detail on slide 22)", "2. [Decision]"], accent=RED)
-notes(s, "KPI cards: copy from the KPI card row of the team tab (Net Added ARR, Attainment, Ending ARR, Renewal rate, "
-         "Churn ARR, Active customers) and the metric block for the logo split. Set each card's pill: green >= 100% "
-         "attainment / on plan, amber 70-99% / watch, red < 70% / behind (same RAG as the cockpit). Write the "
-         "takeaways as conclusions ('Barclays land carried the quarter; without it attainment is 30%'), not as data.")
+notes(s, "KPI cards are filled by Build deck from the tab's KPI cards / metric block; the pills carry the cockpit's RAG "
+         "(green >= 100% / on plan, amber 70-99% / watch, red < 70% / behind). Write the takeaways as conclusions "
+         "('Barclays land carried the quarter; without it attainment is 30%'), not as data.")
 
 # 5 - Scorecard --------------------------------------------------------------------------------------
 s = new_slide(f"02 · {Q} look back", "Scorecard: goal, result, attainment and like-for-like QoQ",
               source=f"{TEAM} tab > 'ACTUALS | FORECAST QUARTER' block (Metric / {Q} / QoQ / Trend columns) "
                      f"and Accounts block; Goals tab for goals")
 rows = [
-    ["Net Added ARR", "$X.XM", "$X.XM", "NN%", "+NN%", "Closed Won Delta ARR + full-churn renewals (MSP ARR when NACV = 0)"],
-    ["Quarter elapsed / pace", "-", "NN%", "NN%", "-", "Attainment / elapsed: 100% = straight-line to goal"],
-    ["Logo goal / Logos Won (Land only, Majors)", "N", "N", "NN%", "+N", "Closed Won Land on Major accounts"],
-    ["Logos Won (Land + MSP, Majors)", "N", "N", "NN%", "+N", "MSP on a new account counts as a landed logo"],
-    ["Logo attainment (expected, incl. open opps)", "N", "N.N", "NN%", "-", "Sum of Expected Logo Impact - forecast until closed"],
-    ["# Renewals / # won / renewal rate", "-", "N / N / NN%", "-", "+NN pts", "Closed renewals in the quarter, by count"],
-    ["Churn ARR / # customers", "-", "-$X.XM / N", "-", "-$X.XM", "Full churn + downgrades"],
-    ["GRR / NRR", "-", "NN% / NN%", "-", "+NN pts", "Of Starting ARR"],
-    ["Starting -> Ending ARR", "-", "$X.XM -> $X.XM", "-", "+NN%", "ARR Ledger balances (full quarter, not same-point)"],
-    ["Open pipeline (this quarter) / coverage", "-", "$X.XM / N.Nx", "-", "-", "No same-point value while the quarter is open"],
+    ["Net Added ARR", tok("revenueGoal"), tok("netAddedArr"), tok("attainment"), tok("qoq.netAddedArr"),
+     "Closed Won Delta ARR + full-churn renewals (MSP ARR when NACV = 0)"],
+    ["Quarter elapsed / pace", "-", tok("quarterElapsedPct"), tok("pace"), tok("qoq.pace"), "Attainment / elapsed: 100% = straight-line to goal"],
+    ["Logo goal / Logos Won (Land only, Majors)", tok("logoGoal"), tok("logosWonLand"), "-", tok("qoq.logosWonLand"), "Closed Won Land on Major accounts"],
+    ["Logos Won (Land + MSP, Majors)", tok("logoGoal"), tok("logosWonMajors"), "-", tok("qoq.logosWonMajors"), "MSP on a new account counts as a landed logo"],
+    ["Logo attainment (expected, incl. open opps)", tok("logoGoal"), tok("logoAttainment"), tok("logoAttainmentPct"), tok("qoq.logoAttainment"),
+     "Sum of Expected Logo Impact - forecast until closed"],
+    ["# Renewals / # won / renewal rate", "-", f"{tok('renewals')} / {tok('wonRenewals')} / {tok('renewalRate')}", "-", tok("qoq.renewalRate"),
+     "Closed renewals in the quarter, by count"],
+    ["Churn ARR / # customers", "-", f"{tok('churnArr')} / {tok('churnCustomers')}", "-", tok("qoq.churnArr"), "Full churn + downgrades"],
+    ["GRR / NRR", "-", f"{tok('grr')} / {tok('nrr')}", "-", tok("qoq.grr"), "Of Starting ARR"],
+    ["Starting -> Ending ARR", "-", f"{tok('startingArr')} -> {tok('endingArr')}", "-", tok("qoq.endingArr"),
+     "ARR Ledger balances (full quarter, not same-point)"],
+    ["Open pipeline (this quarter) / coverage", "-", f"{tok('openPipelineArr')} / {tok('pipelineCoverage')}", "-", tok("qoq.openPipelineArr"),
+     "No same-point value while the quarter is open"],
 ]
-table(s, MX, CONTENT_TOP, CONTENT_W, ["Metric", "Goal", Q, "Attainment", "QoQ (same point while open)", "Definition (cockpit)"],
+table(s, MX, CONTENT_TOP, CONTENT_W, ["Metric", "Goal", Q, "Attainment", tok("qoqHeader"), "Definition (cockpit)"],
       rows, col_w=[3.0, 0.9, 1.6, 1.0, 1.7, 4.0], size=8.5, row_h=Inches(0.36), bold_first_col=True, guidance_cols=(5,))
-guidance(s, MX, CONTENT_TOP + Inches(4.1), CONTENT_W, Inches(0.5),
-         "Colour the Attainment cells with the cockpit's RAG (green >= 100%, amber 70-99%, red < 70%). "
-         "QoQ column header must say what the cockpit says: 'QoQ vs Qx-yyyy at the same point (day N)' while open, "
-         "'QoQ vs Qx-yyyy' once closed.")
-notes(s, "Straight copy of the metric block. Do not retype definitions - they are the Definitions tab wording. If a "
-         "cell shows '-' in the cockpit, show '-' here (no same-point baseline), do not fill it from another report.")
+pill(s, MX, CONTENT_TOP + Inches(4.1), tok("rag.attainment"), PANEL, MUTED, w=Inches(1.5), size=7)
+guidance(s, MX + Inches(1.7), CONTENT_TOP + Inches(4.08), CONTENT_W - Inches(1.7), Inches(0.5),
+         "Revenue attainment RAG (green >= 100%, amber 70-99%, red < 70%). The QoQ header states the cockpit's basis: "
+         "same elapsed day of the previous quarter while open, full quarter once closed; '-' = no like-for-like value.")
+notes(s, "Filled from the metric block by Build deck. Definitions are the Definitions tab wording - do not retype them. "
+         "A '-' means the cockpit has no same-point baseline; do not fill it from another report.")
 
 # 6 - ARR bridge -------------------------------------------------------------------------------------
 s = new_slide(f"02 · {Q} look back", "[Headline: e.g. 'Ending ARR $X.XM, +NN% QoQ, driven by N expansions; churn limited to N account']",
               source=f"{TEAM} tab > ARR bridge block (Starting, Added, Downgrade, Full Churn, Ending, GRR, NRR) "
                      f"and CHARTS > 'ARR bridge {Q}'; ARR Ledger tab for Starting / Ending")
 chart_placeholder(s, MX, CONTENT_TOP, Inches(7.4), Inches(4.3), f"ARR bridge {Q}",
-                  f"Link the 'ARR bridge {Q}' waterfall from the team tab CHARTS section")
+                  "Waterfall from the team tab CHARTS section (Starting, Added, Downgrade, Full churn, Ending)", chart="ARR bridge")
 x2 = MX + Inches(7.7)
 table(s, x2, CONTENT_TOP, CONTENT_W - Inches(7.7), ["Bridge", "$", "% of Starting"],
-      [["Starting ARR (ledger)", "$X.XM", "100%"], ["+ Added ARR (won)", "$X.XM", "NN%"], ["- Downgrades (N)", "-$X.XM", "NN%"],
-       ["- Full churn (N)", "-$X.XM", "NN%"], ["= Ending ARR", "$X.XM", "NN%"], ["GRR", "NN%", ""], ["NRR", "NN%", ""]],
+      [["Starting ARR (ledger)", tok("startingArr"), "100%"], ["+ Added ARR (won)", tok("addedArr"), tok("bridge.addedPct")],
+       [f"- Downgrades ({tok('downgradeCount')})", tok("downgradeArr"), tok("bridge.downgradePct")],
+       [f"- Full churn ({tok('fullChurnCount')})", tok("fullChurnArr"), tok("bridge.fullChurnPct")],
+       ["= Ending ARR", tok("endingArr"), tok("bridge.endingPct")], ["GRR", tok("grr"), ""], ["NRR", tok("nrr"), ""]],
       col_w=[2.2, 1.1, 1.1], size=9, row_h=Inches(0.32), bold_first_col=True)
 callout(s, x2, CONTENT_TOP + Inches(2.75), CONTENT_W - Inches(7.7), Inches(1.55), "So what",
         "[What the bridge says about the book: concentration of Added ARR in 1-2 deals, whether churn was expected, "
@@ -439,56 +530,56 @@ notes(s, "Starting / Ending ARR are ARR Ledger balances (seeded from the cockpit
 s = new_slide(f"02 · {Q} look back", "[Headline: e.g. 'N deals won for $X.XM Delta ARR - Net Added ARR ties out to these rows']",
               source=f"{TEAM} tab > 'Top 10 Deals Won {Q}' table (Account, Opportunity link, Type, Deal value (TCV), Delta ARR, Owner)")
 table(s, MX, CONTENT_TOP, Inches(8.6), ["Account", "Type", "Deal value (TCV)", "Delta ARR", "Owner", "Why we won / what it unlocks"],
-      [["[Account]", "[Land / Expand / MSP]", "$X.XM", "$X.XM", "[Owner]", "[1 line]"] for _ in range(10)]
-      + [["Other wins not shown (N)", "", "$X.XM", "$X.XM", "", "Delete this row if the quarter has <= 10 wins"]],
+      rows_for("dealsWon", ["", "", "", "", "[1 line - why we won, what it unlocks]"], n=10),
       col_w=[2.0, 1.6, 1.2, 1.1, 1.3, 3.0], size=8.5, row_h=Inches(0.34), bold_first_col=True, guidance_cols=(5,))
 x2 = MX + Inches(8.9)
 callout(s, x2, CONTENT_TOP, CONTENT_W - Inches(8.9), Inches(1.5), "Tie-out",
-        "Delta ARR of all wins (top 10 + 'other wins' row) + Closed Lost renewals (full churn) = Net Added ARR $X.XM on "
-        "slide 5. Attribution is by account team: a deal owned by another team's rep on this team's account counts here.")
+        f"{tok('wonCount')} wins, {tok('wonArr')} Delta ARR ({tok('dealsWonShown')} shown; other wins {tok('dealsWonOther')} / "
+        f"{tok('dealsWonOtherArr')}) + full-churn renewals {tok('fullChurnArr')} = Net Added ARR {tok('netAddedArr')}. "
+        "Attribution is by account team: a deal owned by another team's rep on this team's account counts here.")
 callout(s, x2, CONTENT_TOP + Inches(1.7), CONTENT_W - Inches(8.9), Inches(1.3), "TCV vs Delta ARR",
         "MSP deals: TCV is the contract value; Delta ARR is the ARR booked (NACV, or the opp's ARR when NACV is 0). "
         "Explain any large gap in one line.", accent=BLUE)
 callout(s, x2, CONTENT_TOP + Inches(3.2), CONTENT_W - Inches(8.9), Inches(1.1), "Concentration",
-        "Top deal = NN% of Added ARR. [Say whether that is a risk.]", accent=AMBER)
-notes(s, "Copy the Top 10 Deals Won table; keep the Salesforce links (paste the account name as a hyperlink to the "
-         "opportunity URL from Raw Data). If the cockpit title reads 'N Closed Won, $X shown of $Y', put the difference "
-         "in the 'Other wins not shown' row so the tie-out holds; otherwise delete that row. 'Why we won' is the only "
-         "manual column.")
+        f"Top deal = {tok('topDealShare')} of won Delta ARR. [Say whether that is a risk.]", accent=AMBER)
+notes(s, "Filled from the Top 10 Deals Won table (account names link to Salesforce). With more than ten wins Build deck "
+         "adds an 'Other wins not shown' row so the tie-out holds. 'Why we won' is the only manual column.")
 
 # 8 - Logos ------------------------------------------------------------------------------------------
 s = new_slide(f"02 · {Q} look back", "[Headline: e.g. 'N of N logos landed; N more expected from open Major opps']",
               source=f"{TEAM} tab > metric block rows 'Logo Goal', 'Logos Won (Land only, Majors)', 'Logos Won (Land + MSP, Majors)', "
                      f"'Logo Attainment (expected, incl. open opps)' and 'Logos Won (Land + MSP)' table")
 cw = (Inches(6.2) - 2 * Inches(0.2)) / 3
-for i, (lab, val, sub) in enumerate([("Logo goal", "N", "Goals tab"), ("Won - Land only", "N", "Closed Won Land, Majors"),
-                                     ("Won - Land + MSP", "N", "MSP on new account = logo")]):
+for i, (lab, val, sub) in enumerate([("Logo goal", tok("logoGoal"), "Goals tab"), ("Won - Land only", tok("logosWonLand"), "Closed Won Land, Majors"),
+                                     ("Won - Land + MSP", tok("logosWonMajors"), "MSP on new account = logo")]):
     kpi_card(s, MX + i * (cw + Inches(0.2)), CONTENT_TOP, cw, Inches(1.3), lab, val, sub)
-pill(s, MX, CONTENT_TOP + Inches(1.45), "FORECAST: expected logo attainment N.N incl. open opps (sum of Expected Logo Impact)", BLUE_BG,
-     BLUE, w=Inches(6.2), size=8)
+pill(s, MX, CONTENT_TOP + Inches(1.45), f"Expected logo attainment {tok('logoAttainment')} incl. open opps ({tok('logoAttainmentPct')} of goal) - "
+     "forecast until closed", BLUE_BG, BLUE, w=Inches(6.2), size=8)
 table(s, MX, CONTENT_TOP + Inches(1.9), Inches(6.2), ["Account (logo won)", "Type", "TCV", "Delta ARR", "Owner"],
-      [["[Account]", "Land / MSP", "$X.XM", "$X.XM", "[Owner]"] for _ in range(5)], col_w=[2.4, 1.0, 1.0, 1.0, 1.4],
+      rows_for("logosWon", ["", "", "", ""], n=5), col_w=[2.4, 1.0, 1.0, 1.0, 1.4],
       size=8.5, row_h=Inches(0.32), bold_first_col=True)
 x2 = MX + Inches(6.5)
 table(s, x2, CONTENT_TOP, CONTENT_W - Inches(6.5), ["Open Major logo opp (this quarter)", "Stage", "Expected logo impact", "Close date"],
-      [["[Account]", "[stage]", "0.NN", "[date]"] for _ in range(5)], col_w=[2.6, 1.6, 1.4, 1.1], size=8.5,
+      rows_for("openLogoOpps", ["", "", ""], n=5), col_w=[2.6, 1.6, 1.4, 1.1], size=8.5,
       row_h=Inches(0.32), bold_first_col=True)
 callout(s, x2, CONTENT_TOP + Inches(2.2), CONTENT_W - Inches(6.5), Inches(1.6), "So what",
         "[Landed vs expected gap: which open opps must close to hit the logo goal, and whether Expected Logo Impact in "
         "Salesforce is set correctly (an MSP logo with impact 0 under-states the forecast).]")
-notes(s, "Won logos: 'Logos Won (Land + MSP)' table. Open Major logo opps: Raw Data filtered on Tab = team, Quarter = "
-         "selected, Stage open, Type Land/MSP, Major Account = TRUE (Expected Logo Impact column).")
+notes(s, "Won logos: 'Logos Won (Land + MSP)' table. Open Major logo opps: open Land / MSP opps on Major accounts with a "
+         "close date in the quarter, sorted by Expected Logo Impact (same rows as Raw Data).")
 
 # 9 - Retention --------------------------------------------------------------------------------------
 s = new_slide(f"02 · {Q} look back", "[Headline: e.g. 'N of N renewals won; $X.XM churned across N accounts, all [reason]']",
               source=f"{TEAM} tab > 'Churned Customers', 'Downgrade Customers', 'Renewals Won', 'Renewals Lost' tables; "
                      f"metric rows '# Renewals', '# Won Renewals', 'Renewal Rate', 'Churn - ARR $', 'Reasons for Churn'; CHARTS > 'Renewals {Q}'")
 cw = (CONTENT_W - 3 * Inches(0.2)) / 4
-for i, (lab, val, sub) in enumerate([("Renewals closed", "N", "Won N · Lost N"), ("Renewal rate", "NN%", "By count; '-' if none closed"),
-                                     ("Churn ARR", "-$X.XM", "Full churn N · Downgrade N"), ("GRR / NRR", "NN% / NN%", "Of Starting ARR")]):
+for i, (lab, val, sub) in enumerate([("Renewals closed", tok("renewals"), f"Won {tok('wonRenewals')} · Lost {tok('lostRenewals')}"),
+                                     ("Renewal rate", tok("renewalRate"), "By count; '-' if none closed"),
+                                     ("Churn ARR", tok("churnArr"), f"Full churn {tok('fullChurnCount')} · Downgrade {tok('downgradeCount')}"),
+                                     ("GRR / NRR", f"{tok('grr')} / {tok('nrr')}", "Of Starting ARR")]):
     kpi_card(s, MX + i * (cw + Inches(0.2)), CONTENT_TOP, cw, Inches(1.2), lab, val, sub)
 table(s, MX, CONTENT_TOP + Inches(1.45), Inches(8.2), ["Account", "Outcome", "Record type", "Close date", "Delta ARR", "Reason / lesson"],
-      [["[Account]", "Churned / Downgrade / Renewed / Lost", "[type]", "[date]", "-$X.XM", "[Lost reason + what we learned]"] for _ in range(6)],
+      rows_for("retention", ["", "", "", "", "[Salesforce lost reason if any; add what we learned]"], n=6),
       col_w=[2.0, 1.9, 1.2, 1.0, 1.0, 3.0], size=8.5, row_h=Inches(0.34), bold_first_col=True, guidance_cols=(5,))
 callout(s, MX + Inches(8.5), CONTENT_TOP + Inches(1.45), CONTENT_W - Inches(8.5), Inches(1.6), "Was it predicted?",
         "[Compare to last QBR's 'Predicted churn' slide: which churns were on it, which were not, and why.]", accent=AMBER)
@@ -502,14 +593,14 @@ s = new_slide(f"02 · {Q} look back", "[Headline: e.g. 'N pilots completed (N co
               source=f"{TEAM} tab > '# Active Pilots (open, 3- Tech Validation)', '# Pilots Completed (this quarter)', "
                      f"'Active Pilots' and 'Pilots Completed {Q}' tables; Accounts block '# Activated Prospects', 'Conversion Rate'")
 cw = (Inches(5.0) - Inches(0.2)) / 2
-kpi_card(s, MX, CONTENT_TOP, cw, Inches(1.2), "Pilots completed", "N", "Pilot Status = Complete, ended this quarter")
-kpi_card(s, MX + cw + Inches(0.2), CONTENT_TOP, cw, Inches(1.2), "Active pilots", "N", "Open opps in 3- Tech Validation")
-kpi_card(s, MX, CONTENT_TOP + Inches(1.4), cw, Inches(1.2), "Activated prospects", "N", "No ARR, open opp")
-kpi_card(s, MX + cw + Inches(0.2), CONTENT_TOP + Inches(1.4), cw, Inches(1.2), "Conversion rate", "NN%",
+kpi_card(s, MX, CONTENT_TOP, cw, Inches(1.2), "Pilots completed", tok("pilotsCompleted"), "Pilot Status = Complete, ended this quarter")
+kpi_card(s, MX + cw + Inches(0.2), CONTENT_TOP, cw, Inches(1.2), "Active pilots", tok("activePilots"), "Open opps in 3- Tech Validation")
+kpi_card(s, MX, CONTENT_TOP + Inches(1.4), cw, Inches(1.2), "Activated prospects", tok("activatedProspects"), "No ARR, open opp")
+kpi_card(s, MX + cw + Inches(0.2), CONTENT_TOP + Inches(1.4), cw, Inches(1.2), "Conversion rate", tok("conversionRate"),
          "Won lands / (won lands + activated) - full quarter only")
 table(s, MX + Inches(5.3), CONTENT_TOP, CONTENT_W - Inches(5.3),
       ["Pilot (account)", "Status / stage now", "End / expected end", "Delta ARR", "Outcome + engineering notes"],
-      [["[Account]", "Complete -> [stage] / Active", "[date]", "$X.XM", "[Converted / lost / extended; DE effort, blockers]"] for _ in range(7)],
+      rows_for("pilots", ["", "", "", "[Converted / lost / extended; DE effort, blockers]"], n=7),
       col_w=[2.0, 1.7, 1.2, 0.9, 2.9], size=8.5, row_h=Inches(0.34), bold_first_col=True, guidance_cols=(4,))
 callout(s, MX, CONTENT_TOP + Inches(2.8), Inches(5.0), Inches(1.5), "So what",
         "[Pilot -> win conversion this quarter; pilots that ran long and why; DE hours per pilot if known. Feeds the "
@@ -564,17 +655,27 @@ s = new_slide(f"04 · {Q1} / {Q2} look ahead", f"[Headline: e.g. '{Q1} forecast 
                      f"# Renewals due, ARR up for renewal, Starting -> Forecast Ending ARR, Forecast Churn); CHARTS > 'Q+1 / Q+2 forecast vs goal'")
 pill(s, MX, CONTENT_TOP - Inches(0.05), "FORECAST (quarter not started) - Net forecast = Expected Delta ARR; Pipeline = open opps' Delta ARR",
      BLUE_BG, BLUE, w=Inches(6.6), size=8)
-rows = [["Revenue goal", "$X.XM", "$X.XM"], ["Net forecast ($) / (%)", "$X.XM / NN%", "$X.XM / NN%"],
-        ["Logo goal / Net forecast (#)", "N / N.N", "N / N.N"], ["Open pipeline / coverage (x goal)", "$X.XM / N.Nx", "$X.XM / N.Nx"],
-        ["# Renewals due / ARR up for renewal", "N / $X.XM", "N / $X.XM"], ["Forecast churn ARR / #", "-$X.XM / N", "-$X.XM / N"],
-        ["Starting ARR -> Forecast Ending ARR", "$X.XM -> $X.XM", "$X.XM -> $X.XM"]]
+
+
+def f12(names, sep=" / "):
+    """The Q+1 and Q+2 cells of a forecast row: the given metrics joined by `sep`, as f1./f2. tokens."""
+    return [sep.join(tok(f"f{i}.{n}") for n in names) for i in (1, 2)]
+
+
+rows = [["Revenue goal", tok("f1.revenueGoal"), tok("f2.revenueGoal")],
+        ["Net forecast ($) / (%)"] + f12(["netForecastArr", "netForecastPct"]),
+        ["Logo goal / Net forecast (#)"] + f12(["logoGoal", "logoForecast"]),
+        ["Open pipeline / coverage (x goal)"] + f12(["pipelineArr", "pipelineCoverage"]),
+        ["# Renewals due / ARR up for renewal"] + f12(["renewalsDueCount", "renewalArrDue"]),
+        ["Forecast churn ARR / #"] + f12(["forecastChurnArr", "forecastChurnCount"]),
+        ["Starting ARR -> Forecast Ending ARR"] + f12(["startingArr", "forecastEndingArr"], sep=" -> ")]
 table(s, MX, CONTENT_TOP + Inches(0.35), Inches(6.6), ["Metric", Q1, Q2], rows, col_w=[3.0, 1.8, 1.8], size=9,
       row_h=Inches(0.36), bold_first_col=True)
 chart_placeholder(s, MX + Inches(6.9), CONTENT_TOP, CONTENT_W - Inches(6.9), Inches(2.6), "Q+1 / Q+2 forecast vs goal",
-                  "Link 'Q+1 / Q+2 forecast vs goal' from the team tab CHARTS section")
+                  "Goal, Net Forecast and Pipeline per future quarter (team tab CHARTS section)", chart="Q+1 / Q+2 forecast vs goal")
 callout(s, MX + Inches(6.9), CONTENT_TOP + Inches(2.8), CONTENT_W - Inches(6.9), Inches(1.5), "So what",
-        "[Gap to goal in $ and logos; whether coverage is enough (rule of thumb 3x); what has to be true for the "
-        "forecast to land.]", accent=AMBER)
+        f"{Q1}: {tok('f1.gapToForecast')} between goal and net forecast, coverage {tok('f1.pipelineCoverage')} (rule of thumb 3x), "
+        f"logo gap {tok('f1.logoGap')}. [What has to be true for the forecast to land.]", accent=AMBER)
 notes(s, "Net Forecast = Expected Delta ARR of every Land / MSP / Expand opp and growing renewal with a close date in the "
          "quarter (closed ones included, at their expected value) plus forecast churn (renewals with Expected Delta ARR < 0, "
          "the 'Predicted Churn' tables). Open pipeline / coverage = Delta ARR of open opps only. Both are labelled FORECAST "
@@ -585,33 +686,29 @@ s = new_slide(f"04 · {Q1} / {Q2} look ahead", "[Headline: e.g. 'NN% of Q+1 pipe
               source=f"{TEAM} tab > 'Pipeline by stage {Q}', 'Pipeline by stage Q+1 {Q1}', 'Pipeline by stage Q+2 {Q2}' tables "
                      f"(Stage, # Open opps, Delta ARR, % of pipeline)")
 tw = (CONTENT_W - 2 * Inches(0.25)) / 3
-stage_rows = [["0- Research", "N", "$X.XM", "NN%"], ["1- Discovery", "N", "$X.XM", "NN%"], ["2- Scope", "N", "$X.XM", "NN%"],
-              ["3- Tech Validation", "N", "$X.XM", "NN%"], ["4- Proposal", "N", "$X.XM", "NN%"], ["5- Negotiation", "N", "$X.XM", "NN%"],
-              ["Total open", "N", "$X.XM", "100%"]]
-for i, q in enumerate([Q, Q1, Q2]):
+for i, (q, marker) in enumerate([(Q, "stages"), (Q1, "stagesQ1"), (Q2, "stagesQ2")]):
     x = MX + i * (tw + Inches(0.25))
     section_label(s, x, CONTENT_TOP, tw, f"Pipeline by stage {q}")
-    table(s, x, CONTENT_TOP + Inches(0.35), tw, ["Stage", "# Opps", "Delta ARR", "% of pipe"], stage_rows,
+    table(s, x, CONTENT_TOP + Inches(0.35), tw, ["Stage", "# Opps", "Delta ARR", "% of pipe"], rows_for(marker, ["", "", ""], n=7),
           col_w=[1.8, 0.8, 1.1, 0.9], size=8.5, row_h=Inches(0.3), bold_first_col=True)
 callout(s, MX, CONTENT_TOP + Inches(3.05), Inches(6.2), Inches(1.3), "Early-stage share",
-        f"{Q1}: NN% of pipeline in stages 0-2  ·  {Q2}: NN%.  [Rule: pipeline in stages 0-2 inside the quarter it is "
-        "meant to close in is at risk; say how much of the forecast depends on it.]", accent=AMBER)
+        f"{Q1}: {tok('f1.earlySharePct')} of pipeline in stages 0-2  ·  {Q2}: {tok('f2.earlySharePct')}.  [Rule: pipeline in stages 0-2 "
+        "inside the quarter it is meant to close in is at risk; say how much of the forecast depends on it.]", accent=AMBER)
 callout(s, MX + Inches(6.5), CONTENT_TOP + Inches(3.05), CONTENT_W - Inches(6.5), Inches(1.3), "Pipeline hygiene",
         "[Stalled >60d ARR from the Reps table; data-quality issues (slide 25) that distort this view: missing close "
         "dates, opps without Expected Delta ARR.]", accent=RED)
 notes(s, "Stage names are the Salesforce picklist, sorted by their numeric prefix; '% of pipeline' is blank when total "
-         "open Delta ARR is 0 or negative. Replace the stage rows with what the cockpit shows (it lists only stages "
-         "that have opps).")
+         "open Delta ARR is 0 or negative. Build deck lists only the stages that have opps, plus a Total open row.")
 
 # 15 - Deals to win -----------------------------------------------------------------------------------
 s = new_slide(f"04 · {Q1} / {Q2} look ahead", "[Headline: e.g. 'Top N deals = NN% of the Q+1 forecast; two are pilot-gated']",
               source=f"{TEAM} tab > 'Top 10 Deals Q+1 {Q1}' and 'Top 10 Deals Q+2 {Q2}' tables (Account, Opportunity link, Stage, Close date, Delta ARR, Owner)")
 half = (CONTENT_W - Inches(0.3)) / 2
-for i, q in enumerate([Q1, Q2]):
+for i, (q, marker) in enumerate([(Q1, "topDealsQ1"), (Q2, "topDealsQ2")]):
     x = MX + i * (half + Inches(0.3))
-    section_label(s, x, CONTENT_TOP, half, f"Top deals {q}")
+    section_label(s, x, CONTENT_TOP, half, f"Top deals {q}  ·  {tok(f'f{i + 1}.topDealsArr')} = {tok(f'f{i + 1}.topDealsSharePct')} of open pipeline")
     table(s, x, CONTENT_TOP + Inches(0.35), half, ["Account", "Stage", "Close", "Delta ARR", "Next step / blocker / help needed"],
-          [["[Account]", "[stage]", "[date]", "$X.XM", "[1 line - owner's commitment]"] for _ in range(8)],
+          rows_for(marker, ["", "", "", "[1 line - owner's commitment]"], n=8),
           col_w=[1.7, 1.2, 0.8, 0.9, 2.3], size=8.5, row_h=Inches(0.33), bold_first_col=True, guidance_cols=(4,))
 notes(s, "Keep the Salesforce links. The last column is the manual part and the basis for the deal review in the "
          "meeting: what happens next, by when, and who outside the team needs to help (exec sponsor, DE, legal).")
@@ -621,19 +718,21 @@ s = new_slide(f"04 · {Q1} / {Q2} look ahead", "[Headline: e.g. '$X.XM of Q+1 re
               source=f"{TEAM} tab > 'Renewals due Q+1 {Q1}' / 'Renewals due Q+2 {Q2}' and 'Predicted Churn Q+1 {Q1}' / 'Predicted Churn Q+2 {Q2}' tables "
                      f"(Account, Opportunity link, Close date, Current ARR, Expected Delta ARR, Owner)")
 cw = (Inches(4.0) - Inches(0.2)) / 2
-kpi_card(s, MX, CONTENT_TOP, cw, Inches(1.2), f"Renewals due {Q1}", "N · $X.XM", "ARR up for renewal")
-kpi_card(s, MX + cw + Inches(0.2), CONTENT_TOP, cw, Inches(1.2), f"Predicted churn {Q1}", "-$X.XM", "Expected Delta ARR < 0")
-kpi_card(s, MX, CONTENT_TOP + Inches(1.4), cw, Inches(1.2), f"Renewals due {Q2}", "N · $X.XM", "ARR up for renewal")
-kpi_card(s, MX + cw + Inches(0.2), CONTENT_TOP + Inches(1.4), cw, Inches(1.2), f"Predicted churn {Q2}", "-$X.XM", "Expected Delta ARR < 0")
+kpi_card(s, MX, CONTENT_TOP, cw, Inches(1.2), f"Renewals due {Q1}", tok("f1.renewalsDueCount"), f"{tok('f1.renewalArrDue')} up for renewal")
+kpi_card(s, MX + cw + Inches(0.2), CONTENT_TOP, cw, Inches(1.2), f"Predicted churn {Q1}", tok("f1.forecastChurnArr"),
+         f"{tok('f1.forecastChurnCount')} renewals with Expected Delta ARR < 0")
+kpi_card(s, MX, CONTENT_TOP + Inches(1.4), cw, Inches(1.2), f"Renewals due {Q2}", tok("f2.renewalsDueCount"), f"{tok('f2.renewalArrDue')} up for renewal")
+kpi_card(s, MX + cw + Inches(0.2), CONTENT_TOP + Inches(1.4), cw, Inches(1.2), f"Predicted churn {Q2}", tok("f2.forecastChurnArr"),
+         f"{tok('f2.forecastChurnCount')} renewals with Expected Delta ARR < 0")
 table(s, MX + Inches(4.3), CONTENT_TOP, CONTENT_W - Inches(4.3),
       ["Account (renewal)", "Close", "Current ARR", "Expected Delta ARR", "Risk driver", "Mitigation + owner"],
-      [["[Account]", "[date]", "$X.XM", "-$X.XM", "[usage / budget / champion / product]", "[action, owner, date]"] for _ in range(7)],
+      rows_for("renewalsAtRisk", ["", "", "", "[usage / budget / champion / product]", "[action, owner, date]"], n=7),
       col_w=[1.9, 0.8, 1.0, 1.2, 1.7, 2.2], size=8.5, row_h=Inches(0.34), bold_first_col=True, guidance_cols=(4, 5))
 callout(s, MX, CONTENT_TOP + Inches(2.8), Inches(4.0), Inches(1.5), "Engineering read-across",
         "[Renewals where adoption / consumption is below contract: what engineering can do before the renewal date.]",
         accent=BLUE)
-notes(s, "Predicted churn = renewal opps (renewal record types) with Expected Delta ARR < 0. Current ARR is the "
-         "account's Current ARR. 'Risk driver' and 'Mitigation' are manual.")
+notes(s, "Predicted churn = renewal opps (renewal record types) with Expected Delta ARR < 0, Q+1 rows then Q+2 rows. "
+         "Current ARR is the account's Current ARR. 'Risk driver' and 'Mitigation' are manual.")
 
 # 17 - Path to goal -----------------------------------------------------------------------------------
 s = new_slide(f"04 · {Q1} / {Q2} look ahead", f"[Headline: e.g. 'Path to the {Q1} goal: $X.XM won + $X.XM commit leaves a $X.XM gap to close from best case']",
@@ -641,14 +740,16 @@ s = new_slide(f"04 · {Q1} / {Q2} look ahead", f"[Headline: e.g. 'Path to the {Q
 chart_placeholder(s, MX, CONTENT_TOP, Inches(7.4), Inches(3.0), f"Path to goal {Q1}",
                   "Optional: build a stacked bar (Won | Commit | Best case | Gap) vs Goal in the cockpit and link it here")
 table(s, MX + Inches(7.7), CONTENT_TOP, CONTENT_W - Inches(7.7), ["Component", Q1, "Basis"],
-      [["Goal", "$X.XM", "Goals tab"], ["Won to date", "$X.XM", "Closed Won in quarter"], ["Commit (stages 4-5)", "$X.XM", "Expected Delta ARR"],
-       ["Best case (stage 3)", "$X.XM", "Expected Delta ARR"], ["Early (stages 0-2)", "$X.XM", "not counted"],
-       ["Gap to goal", "$X.XM", "Goal - Won - Commit"]], col_w=[1.9, 1.1, 1.6], size=9, row_h=Inches(0.33), bold_first_col=True)
+      [["Goal", tok("f1.revenueGoal"), "Goals tab"], [f"Won to date ({tok('f1.wonCount')})", tok("f1.wonArr"), "Closed Won in quarter"],
+       ["Commit (stages 4-5)", tok("f1.commitArr"), "Expected Delta ARR"], ["Best case (stage 3)", tok("f1.bestCaseArr"), "Expected Delta ARR"],
+       ["Early (stages 0-2)", tok("f1.earlyArr"), "not counted"], ["Gap to goal", tok("f1.gapArr"), "Goal - Won - Commit"]],
+      col_w=[1.9, 1.1, 1.6], size=9, row_h=Inches(0.33), bold_first_col=True)
 callout(s, MX, CONTENT_TOP + Inches(3.2), Inches(7.4), Inches(1.1), "How the gap closes",
         "[Named deals that must pull in, expansion to create, or an explicit 'we will miss by $X.XM' - no unnamed upside.]",
         accent=AMBER)
 callout(s, MX + Inches(7.7), CONTENT_TOP + Inches(2.3), CONTENT_W - Inches(7.7), Inches(2.0), "Logo path",
-        f"Goal N  ·  won N  ·  expected from open Major opps N.N  ·  gap N.N.  [Which accounts.]", accent=GREEN)
+        f"Goal {tok('f1.logoGoal')}  ·  net forecast {tok('f1.logoForecast')} from {tok('f1.openLogoMajors')} open Major logo opps  ·  "
+        f"gap {tok('f1.logoGap')}.  [Which accounts.]", accent=GREEN)
 notes(s, "The stage split is a convention for the deck (commit = stages 4-5, best case = stage 3 Tech Validation); "
          "state it on the slide if the team uses different stage cut-offs.")
 
@@ -657,8 +758,9 @@ s = new_slide("05 · Leadership look ahead", f"Sales leadership commentary - pla
 text(s, W - MX - Inches(4.1), Inches(0.3), Inches(4.1), Inches(0.3), "[Sales leader name]  ·  " + Q1, size=9, color=MUTED,
      font=MONO, align=PP_ALIGN.RIGHT)
 callout(s, MX, CONTENT_TOP, half, Inches(1.9), "1 · Commit and upside",
-        f"Commit $X.XM / N logos  ·  Best case $X.XM / N logos  ·  Goal $X.XM / N.  [Named deals behind each number. "
-        "This is the line item compared on next QBR's slide 11.]", accent=GREEN)
+        f"Cockpit: won {tok('f1.wonArr')}  ·  commit {tok('f1.commitArr')}  ·  best case {tok('f1.bestCaseArr')}  ·  goal "
+        f"{tok('f1.revenueGoal')} / {tok('f1.logoGoal')} logos.  [Your commit and upside in $ and logos, and the named deals "
+        "behind each number. This is the line item compared on next QBR's slide 11.]", accent=GREEN)
 callout(s, MX + half + Inches(0.3), CONTENT_TOP, half, Inches(1.9), "2 · How we close the gap",
         "[Pipeline creation plan (meetings / pipeline created targets per rep), partner-sourced pipeline, expansion "
         "plays on the top 10 customers, pricing / packaging moves.]", accent=AMBER)
@@ -691,14 +793,13 @@ notes(s, "Pilot demand comes from the Active Pilots table plus opps expected to 
          "a pilot planned). Capacity numbers are the engineering leader's.")
 
 # 20 - Rep performance --------------------------------------------------------------------------------
-s = new_slide("06 · Team", "[Headline: e.g. 'N of N reps at or above pace; activity coverage lowest on ramping reps']",
+s = new_slide("06 · Team", f"[Headline: e.g. '{tok('repsOnPace')} of {tok('repCount')} reps at or above pace; activity coverage lowest on ramping reps']",
               source=f"{TEAM} tab > REP ACTIVITY & PERFORMANCE > 'Reps' table (Months in seat, Accts owned, Rep goal (FY), Won ARR (QTD / FY), "
                      f"Attainment (FY), Meetings, Activities, Acct coverage, Pipeline created (QTD), Stalled >60d, Renewal risk (FY))")
 table(s, MX, CONTENT_TOP, CONTENT_W,
       ["Rep", "Months in seat", "Accts", "Goal (FY)", "Won ARR (QTD)", "Won ARR (FY)", "Attain. (FY)", "Meetings (QTD)",
        "Activities (QTD)", "Acct cov. (QTD)", "Pipe created (QTD)", "Stalled >60d", "Manager read"],
-      [["[Rep]", "N.N", "N", "$X.XM", "$X.XM", "$X.XM", "NN%", "N", "N", "NN%", "$X.XM", "$X.XM", "[on track / coach / ramping]"]
-       for _ in range(8)],
+      rows_for("reps", [""] * 11 + ["[on track / coach / ramping]"], n=8),
       col_w=[1.6, 0.8, 0.6, 0.9, 1.0, 0.9, 0.8, 0.8, 0.9, 0.8, 1.0, 0.9, 1.8], size=8, row_h=Inches(0.33),
       bold_first_col=True, guidance_cols=(12,))
 guidance(s, MX, CONTENT_TOP + Inches(3.15), CONTENT_W, Inches(0.7),
@@ -708,8 +809,8 @@ guidance(s, MX, CONTENT_TOP + Inches(3.15), CONTENT_W, Inches(0.7),
          "credited to the event owner (no participant credit); slippage rate is not reproduced.")
 callout(s, MX, CONTENT_TOP + Inches(3.85), CONTENT_W, Inches(0.55), "So what",
         "[Who needs what: coaching, territory change, pipeline help, recognition.]", accent=GREEN)
-notes(s, "Copy the Reps table as-is (sorted by Won ARR QTD). The 'Manager read' column is the only manual column and "
-         "replaces the old free-text stack rank.")
+notes(s, "Filled from the Reps table (sorted by Won ARR QTD; names link to Salesforce). The 'Manager read' column is the "
+         "only manual column and replaces the old free-text stack rank.")
 
 # 21 - Hiring / capacity ------------------------------------------------------------------------------
 s = new_slide("06 · Team", "[Headline: e.g. 'N of N planned heads in seat; DE hiring is the gating item for Q+1 pilots']",
@@ -792,15 +893,30 @@ notes(s, "Nothing to fill. If a definition changes in the cockpit's Definitions 
 # 25 - Appendix: data quality -------------------------------------------------------------------------
 s = new_slide("Appendix", "Data quality - what would change these numbers",
               source=f"{TEAM} tab > OWNERS & DATA QUALITY > 'Data quality' table (Issue, Account, Opportunity, Detail, Close date, Owner)", status=False)
-table(s, MX, CONTENT_TOP, CONTENT_W, ["Issue", "Account", "Opportunity", "Detail", "Close date", "Owner", "Fix by"],
-      [["[e.g. Closed Won without Delta ARR]", "[Account]", "[Opp]", "[detail]", "[date]", "[Owner]", "[date]"] for _ in range(8)],
-      col_w=[2.6, 1.8, 1.8, 2.6, 1.0, 1.2, 1.0], size=8.5, row_h=Inches(0.32), bold_first_col=True, guidance_cols=(6,))
+table(s, MX, CONTENT_TOP, CONTENT_W, ["Issue", "Account", "Detail", "Close date", "Owner", "Fix by"],
+      rows_for("dataQuality", ["", "", "", "", "[date]"], n=8),
+      col_w=[2.8, 2.2, 3.6, 1.0, 1.4, 1.0], size=8.5, row_h=Inches(0.32), bold_first_col=True, guidance_cols=(5,))
 guidance(s, MX, CONTENT_TOP + Inches(3.1), CONTENT_W, Inches(0.5),
          "Own the hygiene: each open issue has an owner and a fix-by date. Known model limits (not issues): no per-quarter "
          "account history, rep goals FY-only, MSP Delta ARR = opp ARR when NACV is 0.")
-notes(s, "Copy the 'Data quality' table from the OWNERS & DATA QUALITY section; 'Fix by' is the only manual column. Rows "
+notes(s, "Filled from the 'Data quality' table (OWNERS & DATA QUALITY section); 'Fix by' is the only manual column. Rows "
          "here explain why a number may move on the next refresh (e.g. a Closed Won opp with no Delta ARR).")
+
+def normalise_with_libreoffice(path):
+    """Re-save the deck through LibreOffice: python-pptx output is valid but Google Slides refuses to open it, while the
+    LibreOffice-written package imports cleanly. Skipped (with a warning) when soffice is not installed."""
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        print("warning: soffice not found - file left as written by python-pptx (Google Slides may not open it)")
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run([soffice, "--headless", "--convert-to", "pptx", "--outdir", tmp, path],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        shutil.move(os.path.join(tmp, os.path.basename(path)), path)
+    return True
+
 
 out = sys.argv[1] if len(sys.argv) > 1 else "QBR_Deck_Template.pptx"
 prs.save(out)
-print(f"{out}: {len(prs.slides)} slides")
+normalised = "--raw" not in sys.argv[2:] and normalise_with_libreoffice(out)
+print(f"{out}: {len(prs.slides)} slides{' (LibreOffice-normalised)' if normalised else ''}")

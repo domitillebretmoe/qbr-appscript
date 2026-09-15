@@ -153,8 +153,20 @@ const textStyle = () => {
   };
 };
 
-function globals() {
+const propertyStore = () => {
+  const props = {};
   return {
+    getProperty: key => (key in props ? props[key] : null),
+    setProperty(key, value) { props[key] = String(value); return this; },
+    deleteProperty(key) { delete props[key]; return this; },
+  };
+};
+
+function globals() {
+  const documentProperties = propertyStore();
+  const scriptProperties = propertyStore();
+  return {
+    PropertiesService: { getDocumentProperties: () => documentProperties, getScriptProperties: () => scriptProperties },
     SpreadsheetApp: {
       newDataValidation: builder,
       newConditionalFormatRule: builder,
