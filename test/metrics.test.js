@@ -8,7 +8,7 @@ const ctx = vm.createContext({});
 ['Config.gs', 'Metrics.gs', 'Definitions.gs', 'Reps.gs'].forEach(f => vm.runInContext(fs.readFileSync(`${__dirname}/../src/${f}`, 'utf8'), ctx));
 const { quarterMetrics, forecastMetrics, accountMetrics, partnerMetrics, shiftQuarter, quarterOfDate, teamToken, quartersBetween,
   teamMatches, resolveTeam, assertSpecificTeam, definitionRows, quarterOptions, rollupMembers, withArr, withPace, quarterElapsed,
-  quarterStart, ownerMetrics, ownerLabel, dataQualityIssues, statusText, repMetrics, daysBetween } = ctx;
+  quarterStart, ownerMetrics, ownerLabel, dataQualityIssues, statusText, repMetrics, daysBetween, composeView, samePointInQuarter, qoqBasis } = ctx;
 const ROLLUP_TEAMS = vm.runInContext('ROLLUP_TEAMS', ctx);
 const TEAMS = vm.runInContext('TEAMS', ctx);
 
@@ -357,4 +357,47 @@ test('MSP deals land a logo like Land: Logos Won, New logos, Logos Won table, co
 
   const openMsp = opp('Q4-2026', 'Prospect', 'Bosch', 'MSP', 'Enterprise', 50000, 1, { expectedDeltaArr: 40000 });
   assert.equal(forecastMetrics([openMsp], 'Q4-2026', 0, {}).forecastArr, 40000);
+});
+
+test('QoQ baseline: previous quarter cut at the same elapsed day while the quarter is in progress, full once closed', () => {
+  const rows = [
+    opp('Q2-2026', 'Closed Won', 'Early', 'Expand', 'Enterprise', 100000, 0, { closeDate: '2026-05-20' }),
+    opp('Q2-2026', 'Closed Won', 'Late', 'Land', 'Enterprise', 900000, 1, { closeDate: '2026-07-25', major: true }),
+    opp('Q2-2026', 'Closed Lost', 'Gone', 'Renewal', 'Renewal', -50000, -1, { closeDate: '2026-07-30' }),
+    opp('Q3-2026', 'Closed Won', 'Now', 'Expand', 'Enterprise', 150000, 0, { closeDate: '2026-09-01' }),
+    opp('Q3-2026', '1- Discovery', 'Open', 'Land', 'Enterprise', 400000, 1, { closeDate: '2026-10-15' }),
+  ];
+  const goals = { 'Q1-2026': { revenue: 1, logos: 0 }, 'Q2-2026': { revenue: 1000000, logos: 1 }, 'Q3-2026': { revenue: 1000000, logos: 1 } };
+  const ledger = { 'Q1-2026': { startingArr: 1e6, endingArr: 1e6 }, 'Q2-2026': { startingArr: 1e6, endingArr: 1.95e6 }, 'Q3-2026': { startingArr: 1.95e6, endingArr: 2.1e6 } };
+  const view = today => composeView({ team: 'Europe - DACH', members: ['Europe - DACH'], quarter: 'Q3-2026', opps: rows, accounts: [], goals, ledgers: [ledger], today });
+
+  // 2026-09-10 is day 40 of Q3 (starts 1 Aug) -> Q2 (starts 1 May) as of 2026-06-10: only the early deal had closed.
+  const open = view('2026-09-10');
+  assert.equal(samePointInQuarter('Q3-2026', 'Q2-2026', '2026-09-10'), '2026-06-10');
+  assert.equal(open.previous.samePoint, true);
+  assert.equal(open.previous.asOf, '2026-06-10');
+  assert.equal(open.previous.elapsedDays, 40);
+  assert.equal(open.previous.netAddedArr, 100000);
+  assert.equal(open.previous.wonCount, 1);
+  assert.equal(open.previous.churnArr, 0);
+  assert.equal(open.previous.renewals, 0);
+  assert.equal(open.previous.attainment, 0.1);
+  assert.equal(open.previous.openPipelineArr, null, 'open pipeline cannot be reconstructed as of a past day');
+  assert.equal(open.previous.logoAttainment, null);
+  assert.equal(open.previous.endingArr, 1.95e6, 'ledger balances stay full quarter');
+  assert.equal(open.previous.quarterElapsedPct, quarterElapsed('Q3-2026', '2026-09-10'), 'same share of the quarter elapsed');
+  assert.match(qoqBasis(open.previous), /^Q2-2026 at the same point \(day 40, deals closed by 2026-06-10\)$/);
+  // The trend (charts, sparklines) still carries the full Q2.
+  assert.equal(open.trend[1].netAddedArr, 950000);
+
+  const closed = view('2026-11-05');
+  assert.equal(closed.previous.samePoint, undefined);
+  assert.equal(closed.previous.netAddedArr, 950000);
+  assert.equal(closed.previous.churnArr, -50000);
+  assert.equal(qoqBasis(closed.previous), 'Q2-2026');
+  assert.equal(qoqBasis(null), 'n/a');
+
+  // Full-quarter metrics are untouched by the cut helper when no date is given.
+  assert.equal(quarterMetrics(rows, 'Q2-2026', goals['Q2-2026']).netAddedArr, 950000);
+  assert.equal(quarterMetrics(rows, 'Q2-2026', goals['Q2-2026'], '2026-07-26').netAddedArr, 1000000);
 });

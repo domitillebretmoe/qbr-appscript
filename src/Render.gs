@@ -180,7 +180,7 @@ function renderTeamTab(sheet, view) {
   const trend = writeTrendData(sheet, view.trend);
   const sparklines = trend.quarterCount >= MIN_TREND_QUARTERS ? trend : null;
   const trendHeader = first => [first, view.quarter, 'QoQ'].concat(sparklines ? ['Trend'] : []);
-  const previous = view.trend.length > 1 ? view.trend[view.trend.length - 2] : null;
+  const previous = view.previous || null;
 
   const members = view.members && view.members.length > 1 ? `   (roll-up of ${view.members.map(teamToken).join(', ')})` : '';
   const status = statusText(view.current);
@@ -192,7 +192,7 @@ function renderTeamTab(sheet, view) {
   const kpiRow = 5;
   let row = kpiRow + 4;
 
-  row = writeSection(sheet, row, `${view.current.status} QUARTER`, `${view.quarter} ${status.toLowerCase()} vs goal, QoQ vs ${previous ? previous.quarter : 'n/a'}, trend from ${FIRST_QUARTER}`);
+  row = writeSection(sheet, row, `${view.current.status} QUARTER`, `${view.quarter} ${status.toLowerCase()} vs goal, QoQ vs ${qoqBasis(previous)}, trend from ${FIRST_QUARTER}`);
   row = Math.max(
     writeBlock(sheet, row, 2, trendHeader('Metric'), PREVIOUS_ROWS, [view.current], previous, sparklines, null, [current]),
     writeBlock(sheet, row, 7, ['ARR bridge', view.quarter, '% of Starting'], ARR_ROWS, [view.current], null, null, view.current.startingArr, [current]),
@@ -369,7 +369,7 @@ function writeKpiCards(sheet, row, current, previous, addr) {
     const delta = previous ? qoqText(kind, current[key], previous[key]) : '';
     let deltaColor = qoqColor(key, current[key], previous ? previous[key] : null);
     if (hero) deltaColor = deltaColor === COLORS.up ? COLORS.upOnDark : deltaColor === COLORS.muted ? COLORS.onDark : deltaColor;
-    sheet.getRange(row + 2, col, 1, span).merge().setValue(delta ? `${delta} QoQ` : '').setFontSize(8)
+    sheet.getRange(row + 2, col, 1, span).merge().setValue(delta ? `${delta} QoQ${previous.samePoint ? ' (same point)' : ''}` : '').setFontSize(8)
       .setFontColor(deltaColor).setHorizontalAlignment('left').setVerticalAlignment('top');
   });
   return row + 3;

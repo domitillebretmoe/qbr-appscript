@@ -123,11 +123,25 @@ function quarterStart(label) {
 
 // Share of the quarter's days already elapsed on `today` (yyyy-mm-dd): 0 before it starts, 1 once it is over.
 function quarterElapsed(label, today) {
-  const day = iso => Date.UTC(...iso.split('-').map((n, i) => Number(n) - (i === 1 ? 1 : 0)));
-  const start = day(quarterStart(label));
-  const end = day(quarterStart(shiftQuarter(label, 1)));
-  const now = day(today);
-  return Math.min(1, Math.max(0, (now - start) / (end - start)));
+  const start = quarterStart(label);
+  return Math.min(1, Math.max(0, daysBetween(start, today) / daysBetween(start, quarterStart(shiftQuarter(label, 1)))));
+}
+
+function daysBetween(fromIso, toIso) {
+  const day = iso => Date.UTC(...iso.slice(0, 10).split('-').map((n, i) => Number(n) - (i === 1 ? 1 : 0)));
+  return Math.round((day(toIso) - day(fromIso)) / 86400000);
+}
+
+function shiftDate(iso, days) {
+  const date = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+// The day of `previousQuarter` that is as far in as `today` is in `quarter` (e.g. day 41 of both), for like-for-like
+// quarter-on-quarter comparisons while `quarter` is in progress.
+function samePointInQuarter(quarter, previousQuarter, today) {
+  return shiftDate(quarterStart(previousQuarter), daysBetween(quarterStart(quarter), today));
 }
 
 function quartersBetween(first, last) {

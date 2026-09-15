@@ -420,8 +420,16 @@ test('an open quarter is labelled FORECAST and separates expected logos from log
   assert.equal(sheet.evaluate(metric('Logos Won (Land + MSP, Majors)')), 0);
   assert.equal(sheet.evaluate(metric('Logos Won (Land only, Majors)')), 0);
   assert.equal(sheet.cell(3, 2).value, 'Europe - DACH   Q3-2026 QBR - FORECAST (quarter in progress, 49% elapsed)');
+  // QoQ while in progress is against Q2 at the same elapsed day (15 Sep = day 45 of Q3 -> Q2 as of 15 Jun).
+  const subtitle = cellsWhere(sheet, c => String(c.value).startsWith('Q3-2026 forecast'))[0].value;
+  assert.match(subtitle, /QoQ vs Q2-2026 at the same point \(day 45, deals closed by 2026-06-15\)/);
+  assert.match(String(sheet.cell(7, 2).value), /QoQ \(same point\)$/);
+  const openPipelineQoq = cellsWhere(sheet, c => c.value === 'Open pipeline (this quarter)')[0];
+  assert.equal(sheet.cell(openPipelineQoq.row, openPipelineQoq.col + 2).value, '-', 'no same-point value for open pipeline');
 
   const closed = render(sampleView('Q2-2026'));
+  assert.match(cellsWhere(closed, c => String(c.value).startsWith('Q2-2026 actuals'))[0].value, /QoQ vs Q1-2026,/);
+  assert.match(String(closed.cell(7, 2).value), /QoQ$/);
   const q2 = label => { const cell = cellsWhere(closed, c => c.value === label)[0]; return closed.valueAt(cell.row, cell.col + 1); };
   assert.equal(q2('Logo Attainment (expected, incl. open opps)'), 0, 'Helaba won (+1) nets against Deutsche Telekom churn (-1)');
   assert.equal(q2('Logos Won (Land + MSP, Majors)'), 1);

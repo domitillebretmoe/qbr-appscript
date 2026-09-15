@@ -52,11 +52,6 @@ function repMetrics(rep, s, today) {
   };
 }
 
-function daysBetween(fromIso, toIso) {
-  const day = iso => Date.UTC(...iso.slice(0, 10).split('-').map((n, i) => Number(n) - (i === 1 ? 1 : 0)));
-  return Math.round((day(toIso) - day(fromIso)) / 86400000);
-}
-
 function queryReps(team) {
   const query = `
     SELECT User__c, User__r.Name, User__r.Email, User__r.CreatedDate, User__r.User_Family__c, Group__r.Name, Team__r.Name

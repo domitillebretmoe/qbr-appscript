@@ -11,12 +11,17 @@ const isWon = opp => opp.stage === 'Closed Won';
 const isNewLogo = opp => NEW_LOGO_TYPES.indexOf(opp.type) >= 0;
 const isLost = opp => opp.stage === 'Closed Lost';
 const inQuarter = (opps, quarter) => opps.filter(o => o.quarter === quarter);
+// Drops opportunities closed after `asOf` (yyyy-mm-dd), i.e. the quarter as it stood on that day; null = no cut.
+const closedBy = (opps, asOf) => (asOf ? opps.filter(o => !o.isClosed || !o.closeDate || o.closeDate.slice(0, 10) <= asOf) : opps);
+// Metrics that include open opportunities, which cannot be reconstructed as of a past day.
+const OPEN_OPP_METRICS = ['openPipelineArr', 'pipelineCoverage', 'logoAttainment', 'logoAttainmentPct'];
 const byField = (rows, field, descending) => rows.slice().sort((a, b) => (descending ? b[field] - a[field] : a[field] - b[field]));
 const TOP_N = 10;
 
 // Closed-quarter actuals. Net Added = Sum of Closed Won Delta ARR + Sum of Closed Lost renewal Delta ARR.
-function quarterMetrics(opps, quarter, goal) {
-  const rows = inQuarter(opps, quarter);
+// `asOf` cuts the quarter at that day (deals closed later are ignored) for same-point comparisons.
+function quarterMetrics(opps, quarter, goal, asOf) {
+  const rows = closedBy(inQuarter(opps, quarter), asOf);
   const won = rows.filter(isWon);
   const lost = rows.filter(isLost);
   const fullChurn = lost.filter(isRenewal);
@@ -37,7 +42,7 @@ function quarterMetrics(opps, quarter, goal) {
   const openPipelineArr = sum(open, 'deltaArr');
   const remainingGoal = Math.max(0, (goal.revenue || 0) - netAddedArr);
 
-  return {
+  const metrics = {
     quarter,
     revenueGoal: goal.revenue,
     netAddedArr,
@@ -83,6 +88,8 @@ function quarterMetrics(opps, quarter, goal) {
       renewalsLost: byField(fullChurn, 'deltaArr', false),
     },
   };
+  if (asOf) OPEN_OPP_METRICS.forEach(key => { metrics[key] = null; });
+  return metrics;
 }
 
 // Forward-looking quarter. Net Forecast = Expected Delta ARR of Land / MSP + Expand + renewals expected to grow,
@@ -145,8 +152,8 @@ function accountMetrics(accounts, opps, quarter) {
 
 // Partner contribution = the team's opportunities in the Partnerships group (the "FY26 QBR COCKPIT - Partners"
 // report filters Opportunity.Group__c = Partnerships).
-function partnerMetrics(opps, quarter) {
-  const m = quarterMetrics(opps.filter(o => o.oppGroup === PARTNER_GROUP), quarter, {});
+function partnerMetrics(opps, quarter, asOf) {
+  const m = quarterMetrics(opps.filter(o => o.oppGroup === PARTNER_GROUP), quarter, {}, asOf);
   return { partnerNetAddedArr: m.netAddedArr, partnerNewLogos: m.newLogos, partnerChurnArr: m.churnArr, partnerChurnCustomers: m.churnCustomers };
 }
 
@@ -255,17 +262,37 @@ function composeView({ team, members, quarter, opps, accounts, goals, ledgers, u
       endingArr: ledgers.reduce((total, l) => total + l[q].endingArr, 0),
     };
   });
-  const trend = quarters.map(q => withPace(withArr(
-    Object.assign(quarterMetrics(opps, q, goalFor(q)), accountMetrics(accounts, opps, q), partnerMetrics(opps, q)), ledger[q]), today));
+  const metricsFor = (q, asOf) => withPace(withArr(
+    Object.assign(quarterMetrics(opps, q, goalFor(q), asOf), accountMetrics(accounts, opps, q), partnerMetrics(opps, q, asOf)), ledger[q]), asOf || today);
+  const trend = quarters.map(q => metricsFor(q));
   const current = trend[trend.length - 1];
+  const previous = trend.length > 1 ? previousForQoQ(trend[trend.length - 2], current, today, metricsFor) : null;
   const future1 = forecastMetrics(opps, next1, current.endingArr, goalFor(next1), accounts);
   const future2 = forecastMetrics(opps, next2, future1.forecastEndingArr, goalFor(next2), accounts);
   return {
-    team, members, quarter, trend, current, future: [future1, future2], opps, goals, today,
+    team, members, quarter, trend, current, previous, future: [future1, future2], opps, goals, today,
     reps: reps || [],
     owners: ownerMetrics(opps, quarter, next1, ownerTeams, members),
     dataQuality: dataQualityIssues(opps, unassignedAccounts, [quarter, next1, next2], today),
   };
+}
+
+// The QoQ baseline: the full previous quarter once the selected quarter is closed (or not started), otherwise the
+// previous quarter cut at the same elapsed day so a quarter in progress is compared like for like. Starting /
+// Ending ARR stay the ledger's full-quarter balances.
+function previousForQoQ(fullPrevious, current, today, metricsFor) {
+  if (current.phase !== 'in progress') return fullPrevious;
+  const asOf = samePointInQuarter(current.quarter, fullPrevious.quarter, today);
+  return Object.assign(metricsFor(fullPrevious.quarter, asOf), {
+    samePoint: true,
+    asOf,
+    elapsedDays: daysBetween(quarterStart(current.quarter), today),
+  });
+}
+
+function qoqBasis(previous) {
+  if (!previous) return 'n/a';
+  return previous.samePoint ? `${previous.quarter} at the same point (day ${previous.elapsedDays}, deals closed by ${previous.asOf})` : previous.quarter;
 }
 
 function formatMoney(value) {
